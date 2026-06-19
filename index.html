@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0B3D2E">
+<title>Assesment 5R — Direktorat Operasi</title>
+<style>
+/* ===== Design tokens =====
+   Subject: 5R factory floor audit (Ringkas/Rapi/Resik/Rawat/Rajin) at Pertamina Lubricants.
+   Palette grounded in plant signage: deep "industrial green" (housekeeping/safety board green),
+   warning amber, concrete grey, clean white. Type: Archivo (display, condensed industrial signage
+   feel) + Inter (body). Signature: a vertical 5R rail/progress spine like a factory floor marking. */
+:root{
+  --green:#0B3D2E; --green-600:#12513D; --green-400:#1E7A5A; --lime:#39B54A;
+  --amber:#E8A317; --red:#C0392B; --concrete:#EEF1EE; --ink:#14201B; --muted:#6B7A72;
+  --line:#D6DED8; --white:#fff; --card:#fff;
+  --gold:#D4AF37; --silver:#8E9AAF; --bronze:#B08D57;
+  --shadow:0 1px 3px rgba(11,61,46,.08),0 4px 16px rgba(11,61,46,.06);
+  --radius:14px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--concrete);color:var(--ink);font-size:16px;line-height:1.45;overscroll-behavior-y:none}
+h1,h2,h3,.display{font-family:'Archivo','Inter',sans-serif;font-weight:800;letter-spacing:-.01em}
+.hidden{display:none!important}
+button{font-family:inherit;cursor:pointer;border:none;background:none}
+input,select,textarea{font-family:inherit;font-size:16px}
+
+/* App shell */
+#app{max-width:680px;margin:0 auto;min-height:100vh;background:var(--concrete);position:relative;padding-bottom:90px}
+.topbar{position:sticky;top:0;z-index:50;background:var(--green);color:#fff;padding:14px 18px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 12px rgba(11,61,46,.18)}
+.topbar .logo{width:34px;height:34px;border-radius:8px;background:linear-gradient(135deg,var(--lime),var(--green-400));display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:800;font-size:15px;color:#04231a;flex-shrink:0}
+.topbar .ttl{font-family:'Archivo';font-weight:800;font-size:16px;line-height:1.1}
+.topbar .sub{font-size:11px;opacity:.7;font-weight:500}
+.topbar .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.chip{font-size:11px;font-weight:700;padding:4px 9px;border-radius:999px;background:rgba(255,255,255,.16);text-transform:uppercase;letter-spacing:.04em}
+.icon-btn{color:#fff;opacity:.85;font-size:20px;padding:4px;line-height:1}
+
+.wrap{padding:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+.card h2{margin:0 0 4px;font-size:18px}
+.card .hint{color:var(--muted);font-size:13px;margin:0 0 14px}
+label.field{display:block;margin-bottom:14px}
+label.field .lbl{display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px}
+.input,select.input{width:100%;padding:13px 14px;border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);transition:border-color .15s}
+.input:focus,select.input:focus{outline:none;border-color:var(--green-400)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:14px 20px;border-radius:11px;font-weight:700;font-size:15px;transition:transform .08s,box-shadow .15s,background .15s}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--green);color:#fff;box-shadow:0 2px 10px rgba(11,61,46,.22)}
+.btn-primary:active{background:var(--green-600)}
+.btn-block{width:100%}
+.btn-ghost{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+.btn-amber{background:var(--amber);color:#3a2800}
+.btn-sm{padding:9px 14px;font-size:13px;border-radius:9px}
+.btn-danger{background:#fff;border:1.5px solid #E6B0AA;color:var(--red)}
+
+/* Login */
+.login-hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px;background:
+   radial-gradient(120% 80% at 50% -10%,rgba(30,122,90,.18),transparent 60%),var(--green);color:#fff}
+.login-hero .brandmark{width:62px;height:62px;border-radius:16px;background:linear-gradient(135deg,var(--lime),var(--green-400));display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:800;font-size:26px;color:#04231a;margin-bottom:22px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+.login-hero h1{font-size:30px;line-height:1.05;margin:0 0 6px}
+.login-hero .tag{opacity:.72;font-size:14px;margin-bottom:30px;max-width:30ch}
+.seg{display:flex;gap:8px;margin-bottom:18px;background:rgba(255,255,255,.1);padding:5px;border-radius:12px}
+.seg button{flex:1;padding:11px;border-radius:8px;color:#fff;font-weight:700;font-size:14px;opacity:.7}
+.seg button.on{background:#fff;color:var(--green);opacity:1}
+.login-hero .input{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.25);color:#fff}
+.login-hero .input::placeholder{color:rgba(255,255,255,.5)}
+.login-hero .field .lbl{color:rgba(255,255,255,.6)}
+.login-err{background:rgba(192,57,43,.92);color:#fff;padding:10px 14px;border-radius:9px;font-size:13px;font-weight:600;margin-bottom:14px}
+.rail-5r{display:flex;gap:5px;margin-top:30px;justify-content:center}
+.rail-5r span{font-family:'Archivo';font-weight:800;font-size:11px;letter-spacing:.1em;opacity:.5;padding:5px 9px;border:1px solid rgba(255,255,255,.2);border-radius:6px}
+
+/* Progress spine */
+.spine{position:sticky;top:62px;z-index:40;background:var(--concrete);padding:12px 18px 8px}
+.spine .bar{height:8px;background:#DCE4DF;border-radius:99px;overflow:hidden}
+.spine .fill{height:100%;background:linear-gradient(90deg,var(--green-400),var(--lime));border-radius:99px;transition:width .3s}
+.spine .meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px;font-weight:600}
+.save-ind{color:var(--lime);opacity:0;transition:opacity .3s;font-weight:700}
+.save-ind.on{opacity:1}
+
+/* Aspect group */
+.aspect{margin-bottom:8px}
+.aspect-head{display:flex;align-items:center;gap:10px;padding:12px 4px;font-weight:800;font-family:'Archivo';font-size:16px}
+.aspect-head .tag5r{font-size:11px;font-weight:800;padding:3px 9px;border-radius:6px;color:#fff;letter-spacing:.03em}
+.t-Ringkas{background:#1E7A5A}.t-Rapi{background:#2D7DD2}.t-Resik{background:#16A085}.t-Rawat{background:#8E44AD}.t-Rajin{background:#E8A317;color:#3a2800}
+.aspect-score{margin-left:auto;font-family:'Archivo';font-weight:800;font-size:15px;color:var(--green)}
+
+/* Criteria row */
+.crit{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow)}
+.crit .q{font-size:14px;line-height:1.4;margin-bottom:12px}
+.yn{display:flex;gap:10px}
+.yn button{flex:1;padding:12px;border-radius:10px;font-weight:800;font-size:14px;border:2px solid var(--line);background:#fff;color:var(--muted);transition:all .12s}
+.yn button .ic{font-size:16px;margin-right:5px}
+.yn button.ya.on{background:var(--lime);border-color:var(--lime);color:#04231a}
+.yn button.tidak.on{background:var(--red);border-color:var(--red);color:#fff}
+
+/* Interview 1-5 */
+.scale{display:flex;gap:7px}
+.scale button{flex:1;aspect-ratio:1;border-radius:10px;border:2px solid var(--line);background:#fff;font-family:'Archivo';font-weight:800;font-size:18px;color:var(--muted);display:flex;align-items:center;justify-content:center}
+.scale button.on{background:var(--green);border-color:var(--green);color:#fff;transform:scale(1.05)}
+.scale-desc{font-size:12px;color:var(--muted);margin-top:8px;min-height:32px;font-style:italic}
+
+/* Photo */
+.photo-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.photo-thumb{width:62px;height:62px;border-radius:9px;object-fit:cover;border:1px solid var(--line);position:relative}
+.photo-add{width:62px;height:62px;border-radius:9px;border:2px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:22px;background:#fff}
+.note-input{width:100%;margin-top:10px;padding:9px 11px;border:1.5px solid var(--line);border-radius:9px;font-size:13px;resize:vertical;min-height:0;height:38px}
+.finding{background:#F7FAF8;border:1px dashed var(--line);border-radius:11px;padding:12px;margin:4px 0 14px}
+.finding-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+
+/* Bottom nav */
+.botbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:680px;background:#fff;border-top:1px solid var(--line);display:flex;padding:8px 14px calc(8px + env(safe-area-inset-bottom));gap:10px;z-index:50;box-shadow:0 -4px 20px rgba(11,61,46,.06)}
+.botbar .btn{flex:1}
+
+/* Section nav (area list) */
+.area-item{display:flex;align-items:center;gap:12px;padding:15px;background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;box-shadow:var(--shadow)}
+.area-item .nm{font-weight:700;font-size:15px}
+.area-item .st{font-size:12px;color:var(--muted)}
+.area-item .badge{margin-left:auto;font-family:'Archivo';font-weight:800;font-size:16px;padding:6px 11px;border-radius:9px;background:var(--concrete);color:var(--muted)}
+.area-item .badge.done{background:var(--green);color:#fff}
+.area-item .chev{color:var(--muted);font-size:20px;margin-left:4px}
+
+/* Report */
+.predikat-hero{text-align:center;padding:26px;border-radius:18px;color:#fff;margin-bottom:16px}
+.predikat-hero .score{font-family:'Archivo';font-weight:800;font-size:56px;line-height:1}
+.predikat-hero .lbl{font-size:20px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-top:4px}
+.predikat-hero .sub{opacity:.85;font-size:13px;margin-top:8px}
+.radar-wrap{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
+table.rep{width:100%;border-collapse:collapse;font-size:14px}
+table.rep th,table.rep td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}
+table.rep th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+table.rep td.num{text-align:right;font-family:'Archivo';font-weight:700}
+
+/* Admin */
+.adm-tab{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
+.adm-tab button{white-space:nowrap;padding:9px 15px;border-radius:9px;font-weight:700;font-size:13px;background:#fff;border:1.5px solid var(--line);color:var(--muted)}
+.adm-tab button.on{background:var(--green);color:#fff;border-color:var(--green)}
+.list-row{display:flex;align-items:center;gap:10px;padding:12px;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.list-row .nm{font-weight:600;font-size:14px;flex:1}
+.modal-bg{position:fixed;inset:0;background:rgba(11,32,27,.55);z-index:100;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:#fff;width:100%;max-width:680px;border-radius:18px 18px 0 0;padding:22px;max-height:88vh;overflow-y:auto}
+.modal h3{margin:0 0 16px;font-size:18px}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:99px;font-size:14px;font-weight:600;z-index:200;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:up .3s}
+@keyframes up{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+.empty{text-align:center;padding:40px 20px;color:var(--muted)}
+.empty .ic{font-size:40px;margin-bottom:10px;opacity:.4}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal-root"></div>
+<script src="seed_data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
