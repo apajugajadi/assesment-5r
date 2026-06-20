@@ -301,13 +301,10 @@ function liveScore(d){
 }
 function renderAssessBody(){
   const d=DRAFT, step=d.curArea, body=$('#assess-body');
-  // last step = interview
-  if(step>=d.areas.length){
-    body.innerHTML=`<div class="card"><h2>Tambah Area (opsional)</h2>
-      <p class="hint">Ada area lain yang ditemukan di lapangan tapi belum masuk? Tambahkan di sini.</p>
-      <button class="btn btn-ghost btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>
-      <div class="card"><h2>Wawancara Operator & Supervisor</h2>
-      <p class="hint">Nilai langsung 1 (terburuk) sampai 5 (terbaik) sesuai kondisi.</p></div>`
+  // step 0 = interview (di AWAL)
+  if(step===0){
+    body.innerHTML=`<div class="card"><h2>Wawancara Operator & Supervisor</h2>
+      <p class="hint">Dilakukan di awal. Nilai langsung 1 (terburuk) sampai 5 (terbaik) sesuai kondisi.</p></div>`
       + STORE.config.interview.map((it,idx)=>{
         const val=d.interviewVals[idx]||0;
         const desc=val?it.rubrik[val-1]:'';
@@ -316,14 +313,18 @@ function renderAssessBody(){
           <div class="scale">${[1,2,3,4,5].map(n=>`<button class="${val===n?'on':''}" onclick="setInterview(${idx},${n})">${n}</button>`).join('')}</div>
           <div class="scale-desc" id="idesc-${idx}">${esc(desc)}</div>
         </div>`;
-      }).join('');
+      }).join('')
+      + `<div class="card"><h2>Tambah Area (opsional)</h2>
+      <p class="hint">Ada area lain yang ditemukan di lapangan tapi belum masuk? Tambahkan di sini.</p>
+      <button class="btn btn-ghost btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>`;
     return;
   }
-  const areaId=d.areas[step];
+  const areaIdx=step-1; // area dimulai step 1
+  const areaId=d.areas[areaIdx];
   const area=STORE.config.areaChecks.find(a=>a.id===areaId);
   if(!area){body.innerHTML='<div class="empty">Area tidak ditemukan.</div>';return;}
   let html=`<div class="card" style="background:var(--green);color:#fff;border:none">
-    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">AREA ${step+1} DARI ${d.areas.length}</div>
+    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">AREA ${areaIdx+1} DARI ${d.areas.length}</div>
     <h2 style="color:#fff;margin-top:4px">${esc(area.name)}</h2>
     <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;margin-top:10px" onclick="removeAreaFromSession('${areaId}')">✕ Area ini tidak ada di lapangan</button>
     </div>`;
@@ -373,7 +374,8 @@ function removeAreaFromSession(areaId){
   Object.keys(DRAFT.photos).forEach(k=>{if(k.startsWith(areaId+'|')||k===areaId)delete DRAFT.photos[k];});
   Object.keys(DRAFT.notes).forEach(k=>{if(k.startsWith(areaId+'|')||k===areaId)delete DRAFT.notes[k];});
   DRAFT.areas=DRAFT.areas.filter(id=>id!==areaId);
-  if(DRAFT.curArea>=DRAFT.areas.length)DRAFT.curArea=Math.max(0,DRAFT.areas.length-1);
+  // step area = index+1; clamp ke step terakhir yang valid (areas.length)
+  if(DRAFT.curArea>DRAFT.areas.length)DRAFT.curArea=Math.max(0,DRAFT.areas.length);
   saveDraftLite();renderAssess();toast('Area dihapus dari sesi ini');
 }
 function showAddArea(){
@@ -389,7 +391,7 @@ function showAddArea(){
 }
 function addAreaToSession(areaId){
   if(!DRAFT.areas.includes(areaId))DRAFT.areas.push(areaId);
-  DRAFT.curArea=DRAFT.areas.length-1; // jump to the newly added area
+  DRAFT.curArea=DRAFT.areas.length; // step = area index(N-1)+1 = N, jump ke area baru
   saveDraftLite();closeModal();renderAssess();toast('Area ditambahkan');
 }
 function addPhoto(areaId,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
