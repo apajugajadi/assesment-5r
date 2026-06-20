@@ -59,6 +59,11 @@ label.field .lbl{display:block;font-size:12px;font-weight:700;text-transform:upp
 .login-hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:28px;background:
    radial-gradient(120% 80% at 50% -10%,rgba(30,122,90,.18),transparent 60%),var(--green);color:#fff}
 .login-hero .brandmark{width:62px;height:62px;border-radius:16px;background:linear-gradient(135deg,var(--lime),var(--green-400));display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:800;font-size:26px;color:#04231a;margin-bottom:22px;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+.login-logo5r{width:150px;height:auto;margin-bottom:18px;filter:drop-shadow(0 8px 24px rgba(0,0,0,.35))}
+.login-footer{margin-top:28px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding-top:20px;border-top:1px solid rgba(255,255,255,.12)}
+.login-footer .cap{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.4);font-weight:600}
+.login-pl{height:48px;width:auto;background:#fff;padding:10px 16px;border-radius:10px}
+.topbar-logo{width:34px;height:34px;object-fit:contain;flex-shrink:0;background:rgba(255,255,255,.92);border-radius:8px;padding:3px}
 .login-hero h1{font-size:30px;line-height:1.05;margin:0 0 6px}
 .login-hero .tag{opacity:.72;font-size:14px;margin-bottom:30px;max-width:30ch}
 .seg{display:flex;gap:8px;margin-bottom:18px;background:rgba(255,255,255,.1);padding:5px;border-radius:12px}
@@ -131,6 +136,14 @@ table.rep{width:100%;border-collapse:collapse;font-size:14px}
 table.rep th,table.rep td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}
 table.rep th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 table.rep td.num{text-align:right;font-family:'Archivo';font-weight:700}
+tr.tappable{cursor:pointer}
+tr.tappable:active td{background:#F3F7F4}
+.exp-caret{display:inline-block;font-size:11px;color:var(--green-400);margin-left:4px;vertical-align:middle}
+.klausul-row{display:flex;gap:9px;align-items:flex-start;padding:7px 10px;background:#F7FAF8;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;font-size:13px;line-height:1.35}
+.klausul-row:last-child{margin-bottom:0}
+.kl-ic{flex-shrink:0;width:16px;text-align:center;font-size:14px}
+.kl-q{flex:1;color:var(--ink)}
+.kl-tag{flex-shrink:0;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
 
 /* Admin */
 .adm-tab{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
@@ -152,6 +165,7 @@ table.rep td.num{text-align:right;font-family:'Archivo';font-weight:700}
 <div id="app"></div>
 <div id="modal-root"></div>
 <script src="seed_data.js"></script>
+<script src="logos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

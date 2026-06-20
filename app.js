@@ -56,10 +56,10 @@ function computeReport(draft){
     const area=STORE.config.areaChecks.find(a=>a.id===areaId);if(!area)return;
     ASPECTS.forEach(asp=>{
       const krit=area.aspects[asp];if(!krit||!krit.length)return;
-      let yes=0,answered=0;
-      krit.forEach((_,i)=>{const v=draft.answers[`${areaId}|${asp}|${i}`];if(v==='ya')yes++;if(v)answered++;});
+      let yes=0,answered=0;const detail=[];
+      krit.forEach((q,i)=>{const v=draft.answers[`${areaId}|${asp}|${i}`];if(v==='ya')yes++;if(v)answered++;detail.push({q,v:v||null});});
       const sc=aspectScore(yes);
-      rows.push({area:area.name,aspek:asp,score:sc,answered,total:krit.length});
+      rows.push({area:area.name,aspek:asp,score:sc,answered,total:krit.length,detail});
       sum+=sc;n++;
     });
   });
@@ -125,6 +125,8 @@ function render(){
   if(VIEW==='admin'&&auth.role==='admin'){renderAdmin();return;}
   if(VIEW==='assess'&&DRAFT){renderAssess();return;}
   if(VIEW==='report'&&DRAFT){renderReport();return;}
+  if(VIEW==='findings'&&DRAFT){renderFindings();return;}
+  if(VIEW==='dashboard'){renderDashboard();return;}
   renderHome();
 }
 
@@ -133,7 +135,7 @@ let loginRole='asesor';
 function renderLogin(){
   app().innerHTML=`
   <div class="login-hero">
-    <div class="brandmark">5R</div>
+    <img src="${LOGO_5R}" alt="5R Komitmen Kita" class="login-logo5r">
     <h1>Assesment 5R</h1>
     <div class="tag">Audit Ringkas · Rapi · Resik · Rawat · Rajin — Direktorat Operasi</div>
     <div class="seg">
@@ -151,7 +153,10 @@ function renderLogin(){
         <input class="input" id="li-pass" type="password" placeholder="••••••"></label>
     `}
     <button class="btn btn-amber btn-block" style="margin-top:6px" onclick="doLogin()">Masuk</button>
-    <div class="rail-5r"><span>RINGKAS</span><span>RAPI</span><span>RESIK</span><span>RAWAT</span><span>RAJIN</span></div>
+    <div class="login-footer">
+      <span class="cap">Dipersembahkan oleh</span>
+      <img src="${LOGO_PL}" alt="Pertamina Lubricants" class="login-pl">
+    </div>
   </div>`;
 }
 function doLogin(){
@@ -172,7 +177,7 @@ function doLogin(){
 function topbar(title,sub){
   const auth=getAuth();
   return `<div class="topbar">
-    <div class="logo">5R</div>
+    <img src="${LOGO_5R}" alt="5R" class="topbar-logo">
     <div><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub||'')}</div></div>
     <div class="right">
       <span class="chip">${esc(auth.role)}</span>
@@ -200,7 +205,12 @@ function renderHome(){
     ${resumeHtml}
     <div class="card">
       <h2>Mulai Assesment</h2>
-      <p class="hint">Pilih production unit dan lokasi yang mau dinilai.</p>
+      <p class="hint">Pilih periode, production unit, dan lokasi yang mau dinilai.</p>
+      <label class="field"><span class="lbl">Periode</span>
+        <select class="input" id="h-periode">
+          <option value="Mid Year">Mid Year ${new Date().getFullYear()}</option>
+          <option value="End Year">End Year ${new Date().getFullYear()}</option>
+        </select></label>
       <label class="field"><span class="lbl">Production Unit</span>
         <select class="input" id="h-pu" onchange="homePU=this.value;renderHome()">
           ${pus.map(p=>`<option ${p===homePU?'selected':''}>${esc(p)}</option>`).join('')}
@@ -219,22 +229,23 @@ function renderHome(){
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
           <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
-          <div class="st">${esc(s.date)} · ${esc(s.asesor)}</div></div>
+          <div class="st">${esc(s.periode||"")} · ${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <span class="chev">›</span></div>`;
       }).join('')}
     </div>`:''}
 
-    ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" onclick="VIEW='admin';render()">⚙ Kelola Form & Item Audit</button>`:''}
+    ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Form & Item Audit</button>`:''}
+    <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">📊 Dashboard Analisis Temuan</button>
   </div>`;
 }
 
 function startAssess(){
-  const pu=$('#h-pu').value, loc=$('#h-loc').value;
+  const pu=$('#h-pu').value, loc=$('#h-loc').value, periode=$('#h-periode').value;
   const areas=(STORE.config.matrix[pu]||{})[loc]||[];
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
-  DRAFT={id:'s'+Date.now(),pu,loc,asesor:getAuth().name,date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
+  DRAFT={id:'s'+Date.now(),pu,loc,periode,asesor:getAuth().name,date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
     areas:areaIds,answers:{},interviewVals:{},photos:{},notes:{},curArea:0};
   VIEW='assess';render();
 }
@@ -252,10 +263,16 @@ function renderAssess(){
   // area navigation: list of selected areas + a final "interview" step
   const totalSteps=d.areas.length+1; // +1 for interview step at end
   const step=d.curArea;
-  app().innerHTML=topbar(d.loc,d.pu+' · '+d.asesor)+`
+  const live=liveScore(d);
+  const lg=gradeFor(live.avg);
+  app().innerHTML=topbar(d.loc,d.pu+' · '+(d.periode||'')+' · '+d.asesor)+`
    <div class="spine">
      <div class="bar"><div class="fill" style="width:${prog.pct}%"></div></div>
-     <div class="meta"><span>${prog.done}/${prog.total} terisi</span><span id="save-ind" class="save-ind">✓ Tersimpan</span></div>
+     <div class="meta">
+       <span>${prog.done}/${prog.total} terisi</span>
+       <span id="live-score" style="font-weight:800;color:${lg.color}">${live.avg?'Total '+live.avg.toFixed(2)+' · '+lg.label:'Total —'}</span>
+       <span id="save-ind" class="save-ind">✓ Tersimpan</span>
+     </div>
    </div>
    <div class="wrap" id="assess-body"></div>
    <div class="botbar">
@@ -266,11 +283,30 @@ function renderAssess(){
    </div>`;
   renderAssessBody();
 }
+/* nilai total berjalan (rata2 semua aspek+interview yg sudah terisi) */
+function liveScore(d){
+  let sum=0,n=0;
+  d.areas.forEach(areaId=>{
+    const area=STORE.config.areaChecks.find(a=>a.id===areaId);if(!area)return;
+    ASPECTS.forEach(asp=>{
+      const krit=area.aspects[asp];if(!krit||!krit.length)return;
+      const anyAns=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]);
+      if(!anyAns)return;
+      let yes=0;krit.forEach((_,i)=>{if(d.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
+      sum+=aspectScore(yes);n++;
+    });
+  });
+  (d.interviewVals?Object.values(d.interviewVals):[]).forEach(v=>{if(v){sum+=v;n++;}});
+  return{avg:n?sum/n:null,n};
+}
 function renderAssessBody(){
   const d=DRAFT, step=d.curArea, body=$('#assess-body');
   // last step = interview
   if(step>=d.areas.length){
-    body.innerHTML=`<div class="card"><h2>Wawancara Operator & Supervisor</h2>
+    body.innerHTML=`<div class="card"><h2>Tambah Area (opsional)</h2>
+      <p class="hint">Ada area lain yang ditemukan di lapangan tapi belum masuk? Tambahkan di sini.</p>
+      <button class="btn btn-ghost btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>
+      <div class="card"><h2>Wawancara Operator & Supervisor</h2>
       <p class="hint">Nilai langsung 1 (terburuk) sampai 5 (terbaik) sesuai kondisi.</p></div>`
       + STORE.config.interview.map((it,idx)=>{
         const val=d.interviewVals[idx]||0;
@@ -288,7 +324,9 @@ function renderAssessBody(){
   if(!area){body.innerHTML='<div class="empty">Area tidak ditemukan.</div>';return;}
   let html=`<div class="card" style="background:var(--green);color:#fff;border:none">
     <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">AREA ${step+1} DARI ${d.areas.length}</div>
-    <h2 style="color:#fff;margin-top:4px">${esc(area.name)}</h2></div>`;
+    <h2 style="color:#fff;margin-top:4px">${esc(area.name)}</h2>
+    <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;margin-top:10px" onclick="removeAreaFromSession('${areaId}')">✕ Area ini tidak ada di lapangan</button>
+    </div>`;
   ASPECTS.forEach(asp=>{
     const krit=area.aspects[asp];if(!krit||!krit.length)return;
     let yes=0;krit.forEach((_,i)=>{if(d.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
@@ -311,7 +349,7 @@ function renderAssessBody(){
       <div class="finding-lbl">Temuan & foto — ${asp}</div>
       <div class="photo-row">
         ${photos.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
-        <label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>
+        ${photos.length<1?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
       </div>
       <textarea class="note-input" placeholder="Catatan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
     </div>`;
@@ -322,8 +360,38 @@ function renderAssessBody(){
 function setAns(key,val){DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
 function setInterview(idx,n){DRAFT.interviewVals[idx]=DRAFT.interviewVals[idx]===n?0:n;saveDraftLite();renderAssessBody();updateSpine();}
 function d_setNote(areaId,v){DRAFT.notes[areaId]=v;saveDraftLite();}
-function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}}
+function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}
+  const ls=$('#live-score');if(ls){const lv=liveScore(DRAFT);const g=gradeFor(lv.avg);ls.style.color=g.color;ls.textContent=lv.avg?'Total '+lv.avg.toFixed(2)+' · '+g.label:'Total —';}}
 function navArea(dir){DRAFT.curArea=Math.max(0,Math.min(DRAFT.areas.length,DRAFT.curArea+dir));saveDraftLite();window.scrollTo(0,0);renderAssess();}
+
+/* ---- Dinamika area saat assessment (concern 4) ---- */
+function removeAreaFromSession(areaId){
+  const area=STORE.config.areaChecks.find(a=>a.id===areaId);
+  if(!confirm(`Hapus area "${area?area.name:''}" dari assessment ini? (tidak menghapus master form)`))return;
+  // clear answers/photos/notes for this area
+  Object.keys(DRAFT.answers).forEach(k=>{if(k.startsWith(areaId+'|'))delete DRAFT.answers[k];});
+  Object.keys(DRAFT.photos).forEach(k=>{if(k.startsWith(areaId+'|')||k===areaId)delete DRAFT.photos[k];});
+  Object.keys(DRAFT.notes).forEach(k=>{if(k.startsWith(areaId+'|')||k===areaId)delete DRAFT.notes[k];});
+  DRAFT.areas=DRAFT.areas.filter(id=>id!==areaId);
+  if(DRAFT.curArea>=DRAFT.areas.length)DRAFT.curArea=Math.max(0,DRAFT.areas.length-1);
+  saveDraftLite();renderAssess();toast('Area dihapus dari sesi ini');
+}
+function showAddArea(){
+  const avail=STORE.config.areaChecks.filter(a=>!DRAFT.areas.includes(a.id));
+  if(!avail.length){toast('Semua area sudah masuk');return;}
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Tambah Area ke Assessment</h3>
+    <p class="hint">Pilih area yang ditemukan di lapangan.</p>
+    ${avail.map(a=>`<div class="list-row"><div class="nm">${esc(a.name)}</div>
+      <button class="btn btn-primary btn-sm" onclick="addAreaToSession('${a.id}')">+ Tambah</button></div>`).join('')}
+    <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="closeModal()">Tutup</button>
+  </div></div>`;
+}
+function addAreaToSession(areaId){
+  if(!DRAFT.areas.includes(areaId))DRAFT.areas.push(areaId);
+  DRAFT.curArea=DRAFT.areas.length-1; // jump to the newly added area
+  saveDraftLite();closeModal();renderAssess();toast('Area ditambahkan');
+}
 function addPhoto(areaId,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
 function rmPhoto(areaId,i){if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
@@ -349,14 +417,50 @@ function flashSaved(){
 function clearDraft(){try{localStorage.removeItem(DRAFT_KEY);}catch(e){}}
 function loadDraft(){try{const r=localStorage.getItem(DRAFT_KEY);return r?JSON.parse(r):null;}catch(e){return null;}}
 
+/* ---------- Temuan (findings) ----------
+   Auto-suggest dari aspek yang ada jawaban "Tidak" (kriteria gagal).
+   Tiap temuan: area, kategori 5R, deskripsi, saran, status, foto, dll. Bisa diedit/tambah/hapus.
+*/
+const R5MAP={'Ringkas':'R1','Rapi':'R2','Resik':'R3','Rawat':'R4','Rajin':'R5'};
+function generateFindings(draft){
+  const out=[];
+  draft.areas.forEach(areaId=>{
+    const area=STORE.config.areaChecks.find(a=>a.id===areaId);if(!area)return;
+    ASPECTS.forEach(asp=>{
+      const krit=area.aspects[asp];if(!krit||!krit.length)return;
+      krit.forEach((q,i)=>{
+        if(draft.answers[`${areaId}|${asp}|${i}`]==='tidak'){
+          out.push({
+            id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
+            area:area.name, kategori:asp, r5:R5MAP[asp],
+            deskripsi:q,                  // kriteria yg gagal jadi deskripsi temuan
+            foto:(draft.photos&&draft.photos[`${areaId}|${asp}`]&&draft.photos[`${areaId}|${asp}`][0])||'',
+            saran:'', target:String(new Date().getFullYear()),
+            fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
+            status:'Open', verifikator:'', auto:true
+          });
+        }
+      });
+    });
+  });
+  return out;
+}
 function finishAssess(){
   const rep=computeReport(DRAFT);
   DRAFT.avg=rep.avg;DRAFT.finishedAt=new Date().toISOString();
+  // generate findings only if belum ada (biar edit manual gak ketimpa)
+  if(!DRAFT.findings)DRAFT.findings=generateFindings(DRAFT);
   // upsert into sessions
   const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
   const rec=JSON.parse(JSON.stringify(DRAFT));
   if(i>=0)STORE.sessions[i]=rec;else STORE.sessions.push(rec);
   saveStore();clearDraft();VIEW='report';render();
+}
+function saveDraftSession(){
+  // simpan perubahan temuan ke sessions (dipakai saat edit temuan dari report)
+  const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
+  if(i>=0)STORE.sessions[i]=JSON.parse(JSON.stringify(DRAFT));
+  saveStore();
 }
 
 /* ---------- REPORT ---------- */
@@ -367,7 +471,7 @@ function renderReport(){
     <div class="predikat-hero" style="background:linear-gradient(135deg,${g.color},${shade(g.color,-18)})">
       <div class="score">${rep.avg?rep.avg.toFixed(2):'—'}</div>
       <div class="lbl">${esc(g.label)}</div>
-      <div class="sub">${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
+      <div class="sub">${esc(d.periode||"")} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
     </div>
     <div class="radar-wrap">
       <div style="font-weight:800;font-family:Archivo;margin-bottom:10px">Profil 5R</div>
@@ -375,11 +479,29 @@ function renderReport(){
     </div>
     <div class="card">
       <h2>Rincian Nilai</h2>
+      <p class="hint">Ketuk baris untuk lihat klausul mana yang menentukan nilai.</p>
       <table class="rep"><thead><tr><th>Area</th><th>Aspek</th><th class="num">Nilai</th></tr></thead><tbody>
-      ${rep.rows.map(r=>`<tr><td>${esc(r.area)}</td><td>${esc(r.aspek)}${r.interview?' <span style="font-size:10px;color:var(--amber)">●interview</span>':''}</td><td class="num" style="color:${gradeFor(r.score).color}">${r.score}</td></tr>`).join('')}
+      ${rep.rows.map((r,ri)=>{
+        const expandable=!r.interview&&r.detail&&r.detail.length;
+        const head=`<tr class="rep-head${expandable?' tappable':''}"${expandable?` onclick="toggleDetail(${ri})"`:''}>
+          <td>${esc(r.area)}</td>
+          <td>${esc(r.aspek)}${r.interview?' <span style="font-size:10px;color:var(--amber)">●interview</span>':''}${expandable?` <span class="exp-caret" id="caret-${ri}">▸</span>`:''}</td>
+          <td class="num" style="color:${gradeFor(r.score).color}">${r.score}</td></tr>`;
+        if(!expandable)return head;
+        const body=`<tr class="rep-detail hidden" id="detail-${ri}"><td colspan="3" style="padding:0 8px 12px">
+          ${r.detail.map(d=>{
+            const ic=d.v==='ya'?'<span style="color:var(--lime);font-weight:800">✓</span>':d.v==='tidak'?'<span style="color:var(--red);font-weight:800">✗</span>':'<span style="color:var(--muted)">–</span>';
+            const tag=d.v==='ya'?'Ya':d.v==='tidak'?'Tidak':'belum';
+            const col=d.v==='ya'?'var(--lime)':d.v==='tidak'?'var(--red)':'var(--muted)';
+            return `<div class="klausul-row"><span class="kl-ic">${ic}</span><span class="kl-q">${esc(d.q)}</span><span class="kl-tag" style="color:${col}">${tag}</span></div>`;
+          }).join('')}
+        </td></tr>`;
+        return head+body;
+      }).join('')}
       </tbody></table>
     </div>
     ${reportNotes(d)}
+    ${findingsCard(d)}
     <div class="card">
       <h2>Ekspor</h2>
       <p class="hint">Simpan hasil untuk laporan atau arsip.</p>
@@ -391,6 +513,12 @@ function renderReport(){
     <button class="btn btn-ghost" onclick="VIEW='assess';render()">‹ Edit</button>
     <button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai</button>
   </div>`;
+}
+function toggleDetail(ri){
+  const row=document.getElementById('detail-'+ri),caret=document.getElementById('caret-'+ri);
+  if(!row)return;
+  const open=row.classList.toggle('hidden');
+  if(caret)caret.textContent=open?'▸':'▾';
 }
 function reportNotes(d){
   const items=[];
@@ -443,8 +571,10 @@ function radarSVG(radar){
 }
 function exportCSV(){
   const d=DRAFT,rep=computeReport(d);
-  let rows=[['Production Unit',d.pu],['Lokasi',d.loc],['Asesor',d.asesor],['Tanggal',d.date],['Nilai Akhir',rep.avg?rep.avg.toFixed(2):''],['Predikat',rep.grade.label],[],['Area','Aspek','Nilai','Catatan']];
+  let rows=[['Periode',d.periode||''],['Production Unit',d.pu],['Lokasi',d.loc],['Asesor',d.asesor],['Tanggal',d.date],['Nilai Akhir',rep.avg?rep.avg.toFixed(2):''],['Predikat',rep.grade.label],[],['Area','Aspek','Nilai','Catatan']];
   rep.rows.forEach(r=>rows.push([r.area,r.aspek+(r.interview?' (interview)':''),r.score,'']));
+  rows.push([]);rows.push(['Rincian Klausul']);rows.push(['Area','Aspek','Klausul','Jawaban']);
+  rep.rows.forEach(r=>{if(r.detail)r.detail.forEach(dt=>rows.push([r.area,r.aspek,dt.q,dt.v==='ya'?'Ya':dt.v==='tidak'?'Tidak':'belum dijawab']));});
   rows.push([]);rows.push(['Temuan']);
   Object.keys(d.notes||{}).forEach(k=>{if(d.notes[k]){const parts=k.split('|');const a=STORE.config.areaChecks.find(x=>x.id===parts[0]);rows.push([(a?a.name:parts[0])+(parts[1]?' — '+parts[1]:''),d.notes[k]]);}});
   const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -559,7 +689,7 @@ function delLoc(loc){if(!confirm('Hapus lokasi '+loc+'?'))return;delete STORE.co
 function admSessions(){
   if(!STORE.sessions.length)return `<div class="empty"><div class="ic">📋</div>Belum ada assessment tersimpan.</div>`;
   return STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
-    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.date)} · ${esc(s.asesor)}</div></div>
+    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
       <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${s.avg?s.avg.toFixed(2):'—'}</span>
       <button class="btn btn-ghost btn-sm" onclick="openSession('${s.id}')">Buka</button>
       <button class="btn btn-danger btn-sm" onclick="delSession('${s.id}')">✕</button></div>`;
@@ -588,6 +718,233 @@ function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileRead
 function resetData(){if(!confirm('Reset semua ke data awal? Assessment tersimpan akan hilang.'))return;localStorage.removeItem(LS_KEY);STORE=loadStore();saveStore();renderAdmin();toast('Data direset');}
 
 /* ---------- Warning sebelum nutup halaman saat mengisi ---------- */
+/* ============ TEMUAN & TINDAK LANJUT ============ */
+function findingsCard(d){
+  const f=d.findings||[];
+  const open=f.filter(x=>x.status==='Open').length, close=f.filter(x=>x.status==='Close').length;
+  const pctClose=f.length?Math.round(close/f.length*100):0;
+  return `<div class="card">
+    <h2>Temuan & Tindak Lanjut</h2>
+    <p class="hint">${f.length} temuan (otomatis dari jawaban "Tidak"). Bisa edit, tambah, atau hapus.</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">OPEN</div></div>
+      <div style="flex:1;text-align:center;padding:12px;background:#EAF5EC;border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green-400)">${close}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">CLOSE</div></div>
+      <div style="flex:1;text-align:center;padding:12px;background:var(--concrete);border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green)">${pctClose}%</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">% CLOSE</div></div>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="VIEW='findings';render()">Kelola Temuan →</button>
+  </div>`;
+}
+
+function renderFindings(){
+  const d=DRAFT;const f=d.findings||[];
+  app().innerHTML=topbar('Temuan 5R',d.loc+' · '+(d.periode||''))+`
+  <div class="wrap">
+    <div class="card">
+      <h2>Daftar Temuan</h2>
+      <p class="hint">${f.length} temuan. Tap untuk edit detail, perbaikan, & status.</p>
+      <button class="btn btn-amber btn-block" onclick="editFinding(null)">+ Tambah Temuan Manual</button>
+    </div>
+    ${f.length?f.map(x=>findingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Belum ada temuan. Bagus!</div>'}
+  </div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='report';render()">‹ Kembali ke Hasil</button></div>`;
+}
+function findingRow(x){
+  const stColor=x.status==='Close'?'var(--green-400)':'var(--red)';
+  return `<div class="card" style="padding:14px" onclick="editFinding('${x.id}')">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span class="tag5r t-${x.kategori}">${(x.kategori||'').toUpperCase()}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(x.status)}</span>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(x.area)}</div>
+    <div style="font-size:13px;color:var(--muted)">${esc(x.deskripsi||'(tanpa deskripsi)')}</div>
+    ${x.saran?`<div style="font-size:12px;color:var(--green-400);margin-top:6px">↳ ${esc(x.saran)}</div>`:''}
+  </div>`;
+}
+function editFinding(id){
+  const d=DRAFT;
+  const isNew=!id;
+  const x=id?d.findings.find(f=>f.id===id):{id:'f'+Date.now()+Math.random().toString(36).slice(2,6),area:d.areas.length?(STORE.config.areaChecks.find(a=>a.id===d.areas[0])||{}).name||'':'',kategori:'Ringkas',r5:'R1',deskripsi:'',foto:'',saran:'',target:String(new Date().getFullYear()),fotoPerbaikan:'',deskPerbaikan:'',tglPerbaikan:'',status:'Open',verifikator:''};
+  const areaOpts=STORE.config.areaChecks.map(a=>`<option ${a.name===x.area?'selected':''}>${esc(a.name)}</option>`).join('');
+  const katOpts=['Ringkas','Rapi','Resik','Rawat','Rajin'].map(k=>`<option ${k===x.kategori?'selected':''}>${k}</option>`).join('');
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>${isNew?'Tambah':'Edit'} Temuan</h3>
+    <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
+    <label class="field"><span class="lbl">Area Check</span><select class="input" id="ef-area">${areaOpts}</select></label>
+    <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="ef-kat">${katOpts}</select></label>
+    <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="ef-desk" style="min-height:60px">${esc(x.deskripsi||'')}</textarea></label>
+    <label class="field"><span class="lbl">Foto Temuan</span>
+      <div class="photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="efRmPhoto('foto')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('foto',this)"></label>`}</div>
+    </label>
+    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · PERBAIKAN</div>
+    <label class="field"><span class="lbl">Saran Perbaikan</span><textarea class="input" id="ef-saran" style="min-height:50px">${esc(x.saran||'')}</textarea></label>
+    <label class="field"><span class="lbl">Target Perbaikan</span><input class="input" id="ef-target" value="${esc(x.target||'')}" placeholder="cth: 2026"></label>
+    <label class="field"><span class="lbl">Deskripsi Perbaikan</span><textarea class="input" id="ef-deskp" style="min-height:50px">${esc(x.deskPerbaikan||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Perbaikan</span><input class="input" id="ef-tglp" type="date" value="${esc((x.tglPerbaikan||'').slice(0,10))}"></label>
+    <label class="field"><span class="lbl">Foto Perbaikan</span>
+      <div class="photo-row">${x.fotoPerbaikan?`<img src="${x.fotoPerbaikan}" class="photo-thumb" onclick="efRmPhoto('fotoPerbaikan')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('fotoPerbaikan',this)"></label>`}</div>
+    </label>
+    <div style="font-size:11px;font-weight:800;color:var(--green-400);letter-spacing:.05em;margin:14px 0 8px">C · VERIFIKASI</div>
+    <label class="field"><span class="lbl">Status</span><select class="input" id="ef-status">
+      <option ${x.status==='Open'?'selected':''}>Open</option><option ${x.status==='Close'?'selected':''}>Close</option></select></label>
+    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="ef-verif" value="${esc(x.verifikator||'')}" placeholder="Nama verifikator"></label>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      ${isNew?'':`<button class="btn btn-danger" onclick="delFinding('${x.id}')">Hapus</button>`}
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batal</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveFinding('${x.id}',${isNew})">Simpan</button>
+    </div>
+  </div></div>`;
+  window._efPhoto={foto:x.foto||'',fotoPerbaikan:x.fotoPerbaikan||''};
+}
+function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{window._efPhoto[field]=url;
+  // refresh just that photo-row by re-rendering modal preview
+  inp.closest('.photo-row').innerHTML=`<img src="${url}" class="photo-thumb" onclick="efRmPhoto('${field}')">`;});}
+function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
+function saveFinding(id,isNew){
+  const d=DRAFT;d.findings=d.findings||[];
+  const kat=$('#ef-kat').value;
+  const obj={id,area:$('#ef-area').value,kategori:kat,r5:R5MAP[kat],
+    deskripsi:$('#ef-desk').value.trim(),foto:window._efPhoto.foto||'',
+    saran:$('#ef-saran').value.trim(),target:$('#ef-target').value.trim(),
+    deskPerbaikan:$('#ef-deskp').value.trim(),tglPerbaikan:$('#ef-tglp').value,
+    fotoPerbaikan:window._efPhoto.fotoPerbaikan||'',
+    status:$('#ef-status').value,verifikator:$('#ef-verif').value.trim(),auto:false};
+  if(isNew)d.findings.push(obj);
+  else{const i=d.findings.findIndex(f=>f.id===id);if(i>=0)d.findings[i]={...d.findings[i],...obj};}
+  saveDraftSession();closeModal();renderFindings();toast('Temuan tersimpan');
+}
+function delFinding(id){if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan dihapus');}
+
+/* ============ DASHBOARD ANALISIS ============ */
+let dashFilter={pu:'',periode:'',status:''};
+function allFindings(){
+  // flatten findings dari semua sessions + konteks (pu, loc, periode, asesor)
+  const out=[];
+  STORE.sessions.forEach(s=>{
+    (s.findings||[]).forEach(f=>{
+      out.push({...f,pu:s.pu,loc:s.loc,periode:s.periode||'',asesor:s.asesor,sessionId:s.id});
+    });
+  });
+  return out;
+}
+function renderDashboard(){
+  const auth=getAuth();
+  let F=allFindings();
+  // apply filters
+  if(dashFilter.pu)F=F.filter(x=>x.pu===dashFilter.pu);
+  if(dashFilter.periode)F=F.filter(x=>x.periode===dashFilter.periode);
+  if(dashFilter.status)F=F.filter(x=>x.status===dashFilter.status);
+  const pus=[...new Set(allFindings().map(x=>x.pu))];
+  const periodes=[...new Set(allFindings().map(x=>x.periode).filter(Boolean))];
+
+  const total=F.length, open=F.filter(x=>x.status==='Open').length, close=total-open;
+  const pctClose=total?Math.round(close/total*100):0;
+
+  // per PU
+  const byPU={};F.forEach(x=>{byPU[x.pu]=byPU[x.pu]||{t:0,o:0,c:0};byPU[x.pu].t++;x.status==='Open'?byPU[x.pu].o++:byPU[x.pu].c++;});
+  // per Area
+  const byArea={};F.forEach(x=>{const k=x.pu+' · '+x.loc;byArea[k]=byArea[k]||{t:0,o:0,c:0,pic:x.asesor};byArea[k].t++;x.status==='Open'?byArea[k].o++:byArea[k].c++;});
+  // per Assessor
+  const byAsesor={};F.forEach(x=>{byAsesor[x.asesor]=byAsesor[x.asesor]||{t:0,o:0,c:0};byAsesor[x.asesor].t++;x.status==='Open'?byAsesor[x.asesor].o++:byAsesor[x.asesor].c++;});
+  // per kategori 5R
+  const by5R={};['Ringkas','Rapi','Resik','Rawat','Rajin'].forEach(k=>by5R[k]=0);F.forEach(x=>{if(by5R[x.kategori]!=null)by5R[x.kategori]++;});
+
+  app().innerHTML=topbar('Dashboard Temuan','Analisis 5R')+`
+  <div class="wrap">
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select class="input" style="flex:1;min-width:110px" onchange="dashFilter.pu=this.value;renderDashboard()">
+          <option value="">Semua PU</option>${pus.map(p=>`<option ${p===dashFilter.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+        <select class="input" style="flex:1;min-width:110px" onchange="dashFilter.periode=this.value;renderDashboard()">
+          <option value="">Semua Periode</option>${periodes.map(p=>`<option ${p===dashFilter.periode?'selected':''}>${esc(p)}</option>`).join('')}</select>
+        <select class="input" style="flex:1;min-width:100px" onchange="dashFilter.status=this.value;renderDashboard()">
+          <option value="">Semua Status</option><option ${dashFilter.status==='Open'?'selected':''}>Open</option><option ${dashFilter.status==='Close'?'selected':''}>Close</option></select>
+      </div>
+    </div>
+
+    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data temuan.<br>Selesaikan assessment dulu.</div>':`
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
+        <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green)">${total}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">TEMUAN</div></div>
+      <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
+        <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--red)">${open}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">OPEN</div></div>
+      <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
+        <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green-400)">${pctClose}%</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">CLOSE</div></div>
+    </div>
+
+    <div class="card"><h2>Status Open vs Close</h2>${donutSVG(close,open)}</div>
+
+    <div class="card"><h2>Temuan per Kategori 5R</h2>${barChart(by5R)}</div>
+
+    <div class="card"><h2>Per Production Unit</h2>
+      ${dashTable(byPU,['PU','Temuan','Open','Close','% Close'])}</div>
+
+    <div class="card"><h2>Per Area / Zona</h2>
+      ${dashTable(byArea,['Area','Temuan','Open','Close','% Close'])}</div>
+
+    <div class="card"><h2>Per Assessor</h2>
+      ${dashTable(byAsesor,['Assessor','Temuan','Open','Close','% Close'])}</div>
+
+    <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">⬇ Unduh Rekap (CSV)</button></div>
+    `}
+  </div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
+}
+function dashTable(obj,heads){
+  const keys=Object.keys(obj);
+  if(!keys.length)return '<p class="hint">Tidak ada data.</p>';
+  return `<table class="rep"><thead><tr>${heads.map((h,i)=>`<th${i>0?' class="num"':''}>${h}</th>`).join('')}</tr></thead><tbody>
+    ${keys.map(k=>{const v=obj[k];const pc=v.t?Math.round(v.c/v.t*100):0;
+      return `<tr><td>${esc(k)}</td><td class="num">${v.t}</td><td class="num" style="color:var(--red)">${v.o}</td><td class="num" style="color:var(--green-400)">${v.c}</td><td class="num">${pc}%</td></tr>`;}).join('')}
+  </tbody></table>`;
+}
+function donutSVG(close,open){
+  const total=close+open;if(!total)return '';
+  const pct=close/total;const r=60,c=2*Math.PI*r;const dash=pct*c;
+  return `<div style="display:flex;align-items:center;gap:20px;justify-content:center">
+    <svg viewBox="0 0 160 160" style="width:150px">
+      <circle cx="80" cy="80" r="${r}" fill="none" stroke="#E6B0AA" stroke-width="22"/>
+      <circle cx="80" cy="80" r="${r}" fill="none" stroke="var(--green-400)" stroke-width="22"
+        stroke-dasharray="${dash} ${c}" transform="rotate(-90 80 80)" stroke-linecap="round"/>
+      <text x="80" y="74" text-anchor="middle" font-size="26" font-weight="800" font-family="Archivo" fill="var(--green)">${Math.round(pct*100)}%</text>
+      <text x="80" y="96" text-anchor="middle" font-size="11" fill="#6B7A72">Close</text>
+    </svg>
+    <div style="font-size:13px">
+      <div style="margin-bottom:6px"><span style="display:inline-block;width:12px;height:12px;background:var(--green-400);border-radius:3px;margin-right:6px"></span>Close: <b>${close}</b></div>
+      <div><span style="display:inline-block;width:12px;height:12px;background:#E6B0AA;border-radius:3px;margin-right:6px"></span>Open: <b>${open}</b></div>
+    </div></div>`;
+}
+function barChart(obj){
+  const keys=Object.keys(obj);const max=Math.max(1,...keys.map(k=>obj[k]));
+  const colors={Ringkas:'#1E7A5A',Rapi:'#2D7DD2',Resik:'#16A085',Rawat:'#8E44AD',Rajin:'#E8A317'};
+  return `<div>${keys.map(k=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:64px;font-size:12px;font-weight:700">${k}</div>
+    <div style="flex:1;background:#EEF1EE;border-radius:6px;height:22px;overflow:hidden">
+      <div style="width:${obj[k]/max*100}%;height:100%;background:${colors[k]};border-radius:6px;min-width:${obj[k]?'24px':'0'};display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#fff;font-size:11px;font-weight:700">${obj[k]||''}</div>
+    </div></div>`).join('')}</div>`;
+}
+function exportDashCSV(){
+  let F=allFindings();
+  if(dashFilter.pu)F=F.filter(x=>x.pu===dashFilter.pu);
+  if(dashFilter.periode)F=F.filter(x=>x.periode===dashFilter.periode);
+  if(dashFilter.status)F=F.filter(x=>x.status===dashFilter.status);
+  const head=['PU','Lokasi','Periode','Assessor','Area Check','Kategori','Deskripsi Temuan','Saran Perbaikan','Target','Deskripsi Perbaikan','Tgl Perbaikan','Status','Verifikator'];
+  const rows=[head];
+  F.forEach(x=>rows.push([x.pu,x.loc,x.periode,x.asesor,x.area,x.kategori,x.deskripsi,x.saran,x.target,x.deskPerbaikan,x.tglPerbaikan,x.status,x.verifikator]));
+  const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Rekap_Temuan_5R.csv';a.click();
+  toast('Rekap diunduh');
+}
+
 window.addEventListener('beforeunload',function(e){
   if(VIEW==='assess'&&DRAFT){
     const p=draftProgress(DRAFT);
