@@ -314,9 +314,9 @@ function renderAssessBody(){
           <div class="scale-desc" id="idesc-${idx}">${esc(desc)}</div>
         </div>`;
       }).join('')
-      + `<div class="card"><h2>Tambah Area (opsional)</h2>
-      <p class="hint">Ada area lain yang ditemukan di lapangan tapi belum masuk? Tambahkan di sini.</p>
-      <button class="btn btn-ghost btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>`;
+      + (d.areas.length===0?`<div class="card"><h2>Belum ada area</h2>
+      <p class="hint">Tambahkan area yang akan dinilai di lapangan.</p>
+      <button class="btn btn-primary btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>`:'');
     return;
   }
   const areaIdx=step-1; // area dimulai step 1
@@ -356,6 +356,7 @@ function renderAssessBody(){
     </div>`;
     html+=`</div>`;
   });
+  html+=`<button class="btn btn-ghost btn-block" style="margin-top:4px" onclick="showAddArea()">+ Tambah Area Check yang terlewat</button>`;
   body.innerHTML=html;
 }
 function setAns(key,val){DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
