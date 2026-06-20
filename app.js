@@ -326,7 +326,10 @@ function renderAssessBody(){
   let html=`<div class="card" style="background:var(--green);color:#fff;border:none">
     <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">AREA ${areaIdx+1} DARI ${d.areas.length}</div>
     <h2 style="color:#fff;margin-top:4px">${esc(area.name)}</h2>
-    <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff;margin-top:10px" onclick="removeAreaFromSession('${areaId}')">✕ Area ini tidak ada di lapangan</button>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="removeAreaFromSession('${areaId}')">✕ Tidak ada di lapangan</button>
+      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="showAddArea()">+ Tambah area lain</button>
+    </div>
     </div>`;
   ASPECTS.forEach(asp=>{
     const krit=area.aspects[asp];if(!krit||!krit.length)return;
@@ -356,7 +359,6 @@ function renderAssessBody(){
     </div>`;
     html+=`</div>`;
   });
-  html+=`<button class="btn btn-ghost btn-block" style="margin-top:4px" onclick="showAddArea()">+ Tambah Area Check yang terlewat</button>`;
   body.innerHTML=html;
 }
 function setAns(key,val){DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
