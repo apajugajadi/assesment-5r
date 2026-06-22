@@ -159,6 +159,23 @@ tr.tappable:active td{background:#F3F7F4}
 .empty{text-align:center;padding:40px 20px;color:var(--muted)}
 .empty .ic{font-size:40px;margin-bottom:10px;opacity:.4}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* Hamburger drawer */
+.hb-btn{color:#fff;font-size:22px;line-height:1;padding:4px 6px;background:none;border:none}
+.drawer-bg{position:fixed;inset:0;background:rgba(11,32,27,.5);z-index:150;opacity:0;pointer-events:none;transition:opacity .25s}
+.drawer-bg.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;left:0;height:100%;width:78%;max-width:300px;background:#fff;z-index:160;transform:translateX(-100%);transition:transform .25s;box-shadow:4px 0 24px rgba(0,0,0,.2);display:flex;flex-direction:column}
+.drawer.on{transform:translateX(0)}
+.drawer-head{background:var(--green);color:#fff;padding:22px 20px 18px}
+.drawer-head .nm{font-family:'Archivo';font-weight:800;font-size:18px}
+.drawer-head .rl{font-size:12px;opacity:.7;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.drawer-nav{flex:1;padding:10px;overflow-y:auto}
+.drawer-item{display:flex;align-items:center;gap:14px;width:100%;padding:14px 14px;border-radius:11px;font-size:15px;font-weight:600;color:var(--ink);background:none;border:none;text-align:left;margin-bottom:2px}
+.drawer-item:active{background:var(--concrete)}
+.drawer-item .di-ic{font-size:20px;width:24px;text-align:center}
+.drawer-item.danger{color:var(--red)}
+.drawer-foot{padding:14px 20px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);text-align:center}
+
 </style>
 </head>
 <body>

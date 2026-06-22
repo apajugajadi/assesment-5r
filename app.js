@@ -7,12 +7,33 @@ const AUTH_KEY='asesmen5r_auth';
 const ADMIN_PASS='admin5r';
 const ASESOR_PASS='asesor';
 
+/* ===== FASE 2: Sync ke Google (Apps Script) =====
+   Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
+   SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
+   Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
+const SYNC_URL='https://script.google.com/macros/s/AKfycbwXMjggh6qMX1ABai2kKY33WM_38Jl5gXyBIh8KATeFrfJt2tLtE1E351Dk7KYx_ZMAAg/exec';
+const SYNC_SECRET='ganti-rahasia-ini-123';
+
 /* ---------- Store ---------- */
 function loadStore(){
-  try{const r=localStorage.getItem(LS_KEY);if(r)return JSON.parse(r);}catch(e){}
+  const SEED_VER=SEED_DATA.version||1;
+  try{
+    const r=localStorage.getItem(LS_KEY);
+    if(r){
+      const st=JSON.parse(r);
+      const curVer=(st.config&&st.config.version)||1;
+      if(SEED_VER>curVer){
+        st.config=JSON.parse(JSON.stringify(SEED_DATA));
+        st.sessions=st.sessions||[];
+        try{localStorage.setItem(LS_KEY,JSON.stringify(st));}catch(e){}
+        setTimeout(()=>toast('Klausul diperbarui ke versi terbaru'),400);
+      }
+      return st;
+    }
+  }catch(e){}
   // seed from SEED_DATA
   const s={
-    config:JSON.parse(JSON.stringify(SEED_DATA)), // areaChecks, interview, matrix, grading
+    config:JSON.parse(JSON.stringify(SEED_DATA)), // areaChecks, interview, matrix, grading, version
     sessions:[] // saved assessments
   };
   return s;
@@ -116,7 +137,25 @@ function storageUsage(){
 function storageOK(){return storageUsage()<4.3*1024*1024;} // sisakan buffer dari ~5MB
 
 /* main render dispatch defined in app2.js */
-window.addEventListener('DOMContentLoaded',()=>render());
+window.addEventListener('DOMContentLoaded',()=>{render();checkRemoteConfig();});
+
+/* ===== FITUR 3: tarik config terbaru dari Google (kalau online) ===== */
+async function checkRemoteConfig(){
+  if(!SYNC_URL)return; // offline mode / belum setup
+  try{
+    const res=await fetch(SYNC_URL+'?action=config');
+    const out=await res.json();
+    if(!out.ok||!out.config)return; // belum ada config master di Google
+    const remoteVer=out.config.version||0;
+    const localVer=(STORE.config&&STORE.config.version)||0;
+    if(remoteVer>localVer){
+      STORE.config=out.config;
+      saveStore();
+      toast('📋 Form audit diperbarui ke versi '+remoteVer);
+      if(VIEW==='home'||VIEW==='admin')render();
+    }
+  }catch(e){/* offline / gagal: diam saja, pakai config lokal */}
+}
 
 /* ================= RENDER ================= */
 function render(){
@@ -177,6 +216,7 @@ function doLogin(){
 function topbar(title,sub){
   const auth=getAuth();
   return `<div class="topbar">
+    <button class="hb-btn" onclick="openDrawer()" title="Menu">☰</button>
     <img src="${LOGO_5R}" alt="5R" class="topbar-logo">
     <div><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub||'')}</div></div>
     <div class="right">
@@ -184,6 +224,38 @@ function topbar(title,sub){
       <button class="icon-btn" onclick="logout()" title="Keluar">⏻</button>
     </div></div>`;
 }
+function openDrawer(){
+  const auth=getAuth();if(!auth)return;
+  const dft=loadDraft();
+  const mr=$('#modal-root');
+  mr.innerHTML=`<div class="drawer-bg" id="drawer-bg" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-head">
+      <div class="nm">${esc(auth.name||'Pengguna')}</div>
+      <div class="rl">${esc(auth.role)}</div>
+    </div>
+    <div class="drawer-nav">
+      <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
+      <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">📊</span> Dashboard Analisis Temuan</button>
+      ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Draft</button>`:''}
+      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Form & Item Audit</button>`:''}
+      <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
+    </div>
+    <div class="drawer-foot">Assesment 5R · Direktorat Operasi</div>
+  </div>`;
+  requestAnimationFrame(()=>{$('#drawer-bg').classList.add('on');$('#drawer').classList.add('on');});
+}
+function closeDrawer(){
+  const bg=$('#drawer-bg'),dr=$('#drawer');
+  if(bg)bg.classList.remove('on');if(dr)dr.classList.remove('on');
+  setTimeout(()=>{const mr=$('#modal-root');if(mr)mr.innerHTML='';},250);
+}
+function drawerGo(view){
+  closeDrawer();
+  if(view==='admin'&&getAuth().role!=='admin')return;
+  VIEW=view;render();
+}
+function drawerResume(){closeDrawer();resumeDraft();}
 
 /* ---------- HOME ---------- */
 let homePU=null;
@@ -242,6 +314,12 @@ function renderHome(){
 
 function startAssess(){
   const pu=$('#h-pu').value, loc=$('#h-loc').value, periode=$('#h-periode').value;
+  // ANTI-DOUBLE: 1 PU+Lokasi+Periode cuma boleh sekali (cek data di HP ini)
+  const dup=STORE.sessions.find(s=>s.pu===pu&&s.loc===loc&&(s.periode||'')===(periode||''));
+  if(dup){
+    toast(`⛔ ${loc} (${pu}) periode ${periode} sudah dinilai. Tidak boleh dobel.`);
+    return;
+  }
   const areas=(STORE.config.matrix[pu]||{})[loc]||[];
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
@@ -361,15 +439,26 @@ function renderAssessBody(){
   });
   body.innerHTML=html;
 }
-function setAns(key,val){DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
-function setInterview(idx,n){DRAFT.interviewVals[idx]=DRAFT.interviewVals[idx]===n?0:n;saveDraftLite();renderAssessBody();updateSpine();}
-function d_setNote(areaId,v){DRAFT.notes[areaId]=v;saveDraftLite();}
+function isLocked(){return !!(DRAFT&&DRAFT.locked);}
+function lockBlock(){toast('🔒 Sesi terkunci (sudah dikirim ke Google). Edit dinonaktifkan.');}
+function unlockSession(){
+  const auth=getAuth();if(!auth||auth.role!=='admin'){toast('Hanya admin yang bisa buka kunci');return;}
+  if(!confirm('Buka kunci sesi ini untuk koreksi? Setelah diedit, WAJIB sync ulang ke Google agar data konsisten.'))return;
+  DRAFT.locked=false;
+  const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
+  if(i>=0)STORE.sessions[i].locked=false;
+  saveStore();render();toast('Kunci dibuka — jangan lupa sync ulang setelah edit');
+}
+function setAns(key,val){if(isLocked())return lockBlock();DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
+function setInterview(idx,n){if(isLocked())return lockBlock();DRAFT.interviewVals[idx]=DRAFT.interviewVals[idx]===n?0:n;saveDraftLite();renderAssessBody();updateSpine();}
+function d_setNote(areaId,v){if(isLocked())return;DRAFT.notes[areaId]=v;saveDraftLite();}
 function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}
   const ls=$('#live-score');if(ls){const lv=liveScore(DRAFT);const g=gradeFor(lv.avg);ls.style.color=g.color;ls.textContent=lv.avg?'Total '+lv.avg.toFixed(2)+' · '+g.label:'Total —';}}
 function navArea(dir){DRAFT.curArea=Math.max(0,Math.min(DRAFT.areas.length,DRAFT.curArea+dir));saveDraftLite();window.scrollTo(0,0);renderAssess();}
 
 /* ---- Dinamika area saat assessment (concern 4) ---- */
 function removeAreaFromSession(areaId){
+  if(isLocked())return lockBlock();
   const area=STORE.config.areaChecks.find(a=>a.id===areaId);
   if(!confirm(`Hapus area "${area?area.name:''}" dari assessment ini? (tidak menghapus master form)`))return;
   // clear answers/photos/notes for this area
@@ -393,12 +482,13 @@ function showAddArea(){
   </div></div>`;
 }
 function addAreaToSession(areaId){
+  if(isLocked())return lockBlock();
   if(!DRAFT.areas.includes(areaId))DRAFT.areas.push(areaId);
   DRAFT.curArea=DRAFT.areas.length; // step = area index(N-1)+1 = N, jump ke area baru
   saveDraftLite();closeModal();renderAssess();toast('Area ditambahkan');
 }
-function addPhoto(areaId,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
-function rmPhoto(areaId,i){if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
+function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function rmPhoto(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
 /* ---------- Auto-save draft ---------- */
 const DRAFT_KEY='asesmen5r_draft';
@@ -433,18 +523,21 @@ function generateFindings(draft){
     const area=STORE.config.areaChecks.find(a=>a.id===areaId);if(!area)return;
     ASPECTS.forEach(asp=>{
       const krit=area.aspects[asp];if(!krit||!krit.length)return;
-      krit.forEach((q,i)=>{
-        if(draft.answers[`${areaId}|${asp}|${i}`]==='tidak'){
-          out.push({
-            id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
-            area:area.name, kategori:asp, r5:R5MAP[asp],
-            deskripsi:q,                  // kriteria yg gagal jadi deskripsi temuan
-            foto:(draft.photos&&draft.photos[`${areaId}|${asp}`]&&draft.photos[`${areaId}|${asp}`][0])||'',
-            saran:'', target:String(new Date().getFullYear()),
-            fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
-            status:'Open', verifikator:'', auto:true
-          });
-        }
+      // hitung skor aspek
+      let yes=0;krit.forEach((_,i)=>{if(draft.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
+      const skor=aspectScore(yes);
+      if(skor>2)return; // hanya aspek skor rendah (1-2) yang jadi temuan
+      // klausul yang BUKAN 'ya' (Tidak / belum dijawab) = yang perlu diperbaiki
+      const gagal=krit.filter((_,i)=>draft.answers[`${areaId}|${asp}|${i}`]!=='ya');
+      out.push({
+        id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
+        area:area.name, kategori:asp, r5:R5MAP[asp],
+        skor,
+        deskripsi:`[Nilai ${skor}] ${asp} belum terpenuhi: ${gagal.join('; ')}`,
+        foto:(draft.photos&&draft.photos[`${areaId}|${asp}`]&&draft.photos[`${areaId}|${asp}`][0])||'',
+        saran:'', target:String(new Date().getFullYear()),
+        fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
+        status:'Open', verifikator:'', auto:true
       });
     });
   });
@@ -468,11 +561,76 @@ function saveDraftSession(){
   saveStore();
 }
 
+/* ===== FASE 2: kirim sesi ke Google Apps Script ===== */
+function buildSyncPayload(rec){
+  const rep=computeReport(rec);
+  const detail=[];
+  rec.areas.forEach(areaId=>{
+    const area=STORE.config.areaChecks.find(a=>a.id===areaId);if(!area)return;
+    ASPECTS.forEach(asp=>{
+      const krit=area.aspects[asp];if(!krit||!krit.length)return;
+      let yes=0;krit.forEach((_,i)=>{if(rec.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
+      const skor=aspectScore(yes);
+      krit.forEach((q,i)=>{
+        const v=rec.answers[`${areaId}|${asp}|${i}`];
+        detail.push({area:area.name,aspek:asp,no:i+1,klausul:q,
+          jawaban:v==='ya'?'Ya':v==='tidak'?'Tidak':'belum',skor});
+      });
+    });
+  });
+  return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
+    predikat:rep.grade.label,record:rec,detail};
+}
+async function syncSession(id){
+  if(!SYNC_URL){toast('SYNC_URL belum diisi (lihat panduan Fase 2)');return;}
+  const rec=STORE.sessions.find(s=>s.id===id);
+  if(!rec){toast('Sesi tidak ditemukan');return;}
+  toast('Mengirim ke Google…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(buildSyncPayload(rec))});
+    const out=await res.json();
+    if(out.ok){
+      rec.synced=true;rec.syncedAt=new Date().toISOString();rec.locked=true;
+      rec.syncCount=out.syncCount||((rec.syncCount||0)+1);saveStore();
+      toast(`Terkirim ✓ ${out.photos||0} foto · terkunci`);
+      if(VIEW==='admin')renderAdmin();
+      if(VIEW==='report')render();
+    }else toast('Gagal: '+(out.error||'unknown'));
+  }catch(e){toast('Gagal kirim (sinyal?): '+e.message);}
+}
+async function syncAllUnsynced(){
+  if(!SYNC_URL){toast('SYNC_URL belum diisi');return;}
+  const pending=STORE.sessions.filter(s=>!s.synced);
+  if(!pending.length){toast('Semua sudah ter-sync');return;}
+  toast(`Mengirim ${pending.length} sesi…`);
+  let ok=0;
+  for(const s of pending){
+    try{
+      const res=await fetch(SYNC_URL,{method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify(buildSyncPayload(s))});
+      const out=await res.json();
+      if(out.ok){s.synced=true;s.syncedAt=new Date().toISOString();s.locked=true;s.syncCount=out.syncCount||((s.syncCount||0)+1);ok++;}
+    }catch(e){}
+  }
+  saveStore();renderAdmin();toast(`Selesai: ${ok}/${pending.length} terkirim`);
+}
+
 /* ---------- REPORT ---------- */
 function renderReport(){
   const d=DRAFT, rep=computeReport(d), g=rep.grade;
+  const auth=getAuth();const isAdmin=auth&&auth.role==='admin';
+  const lockBanner=d.locked?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0;display:flex;align-items:center;gap:12px">
+    <span style="font-size:22px">🔒</span>
+    <div style="flex:1"><div style="font-weight:800;font-size:14px">Sesi Terkunci</div>
+    <div style="font-size:12px;color:var(--muted)">Sudah dikirim ke Google${d.syncCount?` (${d.syncCount}×)`:''}${d.syncedAt?' · '+new Date(d.syncedAt).toLocaleString('id-ID'):''}. Edit dinonaktifkan.</div></div>
+    ${isAdmin?`<button class="btn btn-sm btn-amber" onclick="unlockSession()">Buka Kunci</button>`:''}
+  </div>`:'';
   app().innerHTML=topbar('Hasil Assesment',d.pu+' · '+d.loc)+`
   <div class="wrap">
+    ${lockBanner}
     <div class="predikat-hero" style="background:linear-gradient(135deg,${g.color},${shade(g.color,-18)})">
       <div class="score">${rep.avg?rep.avg.toFixed(2):'—'}</div>
       <div class="lbl">${esc(g.label)}</div>
@@ -510,6 +668,7 @@ function renderReport(){
     <div class="card">
       <h2>Ekspor</h2>
       <p class="hint">Simpan hasil untuk laporan atau arsip.</p>
+      ${SYNC_URL?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="syncSession('${d.id}')">☁ Kirim ke Google</button>`:''}
       <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">⬇ Unduh CSV (Excel)</button>
       <button class="btn btn-ghost btn-block" onclick="window.print()">🖨 Cetak / Simpan PDF</button>
     </div>
@@ -596,7 +755,9 @@ function renderAdmin(){
     <div class="adm-tab">
       <button class="${ADMIN_TAB==='area'?'on':''}" onclick="ADMIN_TAB='area';renderAdmin()">Area Check</button>
       <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Form per Lokasi</button>
+      <button class="${ADMIN_TAB==='target'?'on':''}" onclick="ADMIN_TAB='target';renderAdmin()">Target Nilai</button>
       <button class="${ADMIN_TAB==='sessions'?'on':''}" onclick="ADMIN_TAB='sessions';renderAdmin()">Data Tersimpan</button>
+      ${SYNC_URL?`<button class="${ADMIN_TAB==='pantau'?'on':''}" onclick="ADMIN_TAB='pantau';renderAdmin()">Pantau Semua</button>`:''}
       <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Backup</button>
     </div>
     <div id="adm-body"></div>
@@ -605,7 +766,9 @@ function renderAdmin(){
   const b=$('#adm-body');
   if(ADMIN_TAB==='area')b.innerHTML=admArea();
   else if(ADMIN_TAB==='matrix')b.innerHTML=admMatrix();
+  else if(ADMIN_TAB==='target')b.innerHTML=admTarget();
   else if(ADMIN_TAB==='sessions')b.innerHTML=admSessions();
+  else if(ADMIN_TAB==='pantau'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div>';loadPantau();}
   else b.innerHTML=admData();
 }
 function admArea(){
@@ -691,16 +854,124 @@ function toggleArea(pu,loc,areaId,on){
 function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];saveStore();renderAdmin();}
 function delLoc(loc){if(!confirm('Hapus lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];saveStore();renderAdmin();}
 
+/* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
+function targetLoc(pu,loc){const t=STORE.config.targets||{};return t[pu+'::'+loc]||0;}
+function targetPU(pu){
+  const locs=Object.keys(STORE.config.matrix[pu]||{});
+  const vals=locs.map(l=>targetLoc(pu,l)).filter(v=>v>0);
+  return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+}
+function targetNasional(){
+  const pus=Object.keys(STORE.config.matrix);
+  const vals=pus.map(targetPU).filter(v=>v!=null);
+  return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:null;
+}
+function admTarget(){
+  STORE.config.targets=STORE.config.targets||{};
+  const pus=Object.keys(STORE.config.matrix);
+  const nas=targetNasional();
+  let html=`<div class="card"><h2>Target Nilai per Lokasi</h2>
+    <p class="hint">Atur target nilai (1–5) tiap lokasi/zona. Target PU & Nasional dihitung otomatis (rata-rata lokasi).</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      ${pus.map(pu=>{const tp=targetPU(pu);return `<div style="flex:1;min-width:90px;text-align:center;padding:10px;background:var(--concrete);border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:20px;color:var(--green)">${tp?tp.toFixed(2):'—'}</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:700">${esc(pu)}</div></div>`;}).join('')}
+      <div style="flex:1;min-width:90px;text-align:center;padding:10px;background:var(--green);border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:20px;color:#fff">${nas?nas.toFixed(2):'—'}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,.8);font-weight:700">NASIONAL</div></div>
+    </div>
+  </div>`;
+  pus.forEach(pu=>{
+    const locs=Object.keys(STORE.config.matrix[pu]||{});
+    if(!locs.length)return;
+    html+=`<div class="card"><h2 style="font-size:16px">${esc(pu)} · target PU ${targetPU(pu)?targetPU(pu).toFixed(2):'—'}</h2>`;
+    locs.forEach(loc=>{
+      const val=targetLoc(pu,loc);
+      html+=`<div class="list-row"><div class="nm">${esc(loc)}</div>
+        <input class="input" type="number" min="1" max="5" step="0.1" value="${val}" style="width:80px;text-align:center"
+          onchange="setTarget('${esc(pu)}','${esc(loc)}',this.value)"></div>`;
+    });
+    html+=`</div>`;
+  });
+  html+=`<div class="card">
+    <p class="hint">Setelah atur target, sebarkan ke semua asesor lewat tab Backup → Sinkronkan Form.</p>
+    ${SYNC_URL?`<button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Target & Form ke Semua</button>`:''}
+  </div>`;
+  return html;
+}
+function setTarget(pu,loc,v){
+  const n=parseFloat(v);
+  if(isNaN(n)||n<1||n>5){toast('Target harus 1–5');renderAdmin();return;}
+  STORE.config.targets[pu+'::'+loc]=Math.round(n*10)/10;
+  saveStore();renderAdmin();
+}
+
 function admSessions(){
   if(!STORE.sessions.length)return `<div class="empty"><div class="ic">📋</div>Belum ada assessment tersimpan.</div>`;
-  return STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
-    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
+  const pending=STORE.sessions.filter(s=>!s.synced).length;
+  const syncBar=SYNC_URL?`<button class="btn btn-primary btn-block btn-sm" style="margin-bottom:12px" onclick="syncAllUnsynced()">☁ Kirim Semua ke Google${pending?` (${pending} belum)`:' ✓'}</button>`:'';
+  return syncBar+STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
+    const sync=s.synced?'<span style="font-size:10px;color:var(--lime);font-weight:700">☁ tersinkron</span>':'<span style="font-size:10px;color:var(--amber);font-weight:700">● belum sync</span>';
+    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
       <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${s.avg?s.avg.toFixed(2):'—'}</span>
+      ${SYNC_URL?`<button class="btn btn-ghost btn-sm" onclick="syncSession('${s.id}')">☁</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openSession('${s.id}')">Buka</button>
       <button class="btn btn-danger btn-sm" onclick="delSession('${s.id}')">✕</button></div>`;
   }).join('');
 }
 function delSession(id){if(!confirm('Hapus data assessment ini?'))return;STORE.sessions=STORE.sessions.filter(s=>s.id!==id);saveStore();renderAdmin();}
+
+/* ===== FITUR 2: Pantau Semua (tarik dari Google) ===== */
+let PANTAU_FILTER={pu:'',asesor:''};
+async function loadPantau(){
+  const b=$('#adm-body');if(!b)return;
+  try{
+    const res=await fetch(SYNC_URL+'?action=list&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    window._pantauData=out.assessments||[];
+    renderPantau();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal ambil data (sinyal?).<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadPantau()">Coba lagi</button></div>`;}
+}
+function renderPantau(){
+  const b=$('#adm-body');if(!b)return;
+  let rows=window._pantauData||[];
+  const pus=[...new Set(rows.map(x=>x['PU']).filter(Boolean))];
+  const asesors=[...new Set(rows.map(x=>x['Asesor']).filter(Boolean))];
+  if(PANTAU_FILTER.pu)rows=rows.filter(x=>x['PU']===PANTAU_FILTER.pu);
+  if(PANTAU_FILTER.asesor)rows=rows.filter(x=>x['Asesor']===PANTAU_FILTER.asesor);
+  const total=rows.length;
+  const avg=total?(rows.reduce((s,x)=>s+(Number(x['Nilai Akhir'])||0),0)/total):0;
+  b.innerHTML=`
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="margin:0">Pantau Semua</h2>
+        <button class="btn btn-ghost btn-sm" onclick="loadPantau()">↻ Refresh</button>
+      </div>
+      <p class="hint">Data dari semua asesor yang sudah dikirim ke Google.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select class="input" style="flex:1;min-width:120px" onchange="PANTAU_FILTER.pu=this.value;renderPantau()">
+          <option value="">Semua PU</option>${pus.map(p=>`<option ${p===PANTAU_FILTER.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+        <select class="input" style="flex:1;min-width:120px" onchange="PANTAU_FILTER.asesor=this.value;renderPantau()">
+          <option value="">Semua Asesor</option>${asesors.map(a=>`<option ${a===PANTAU_FILTER.asesor?'selected':''}>${esc(a)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
+        <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green)">${total}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">ASSESSMENT</div></div>
+      <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
+        <div style="font-family:Archivo;font-weight:800;font-size:28px;color:${gradeFor(avg).color}">${avg?avg.toFixed(2):'—'}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">RATA-RATA</div></div>
+    </div>
+    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data ter-sync.</div>':
+    rows.slice().reverse().map(x=>{const g=gradeFor(Number(x['Nilai Akhir'])||0);
+      return `<div class="list-row"><div class="nm">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}
+        <div style="font-size:12px;color:var(--muted);font-weight:400">${esc(x['Periode']||'')} · ${esc(x['Tanggal']||'')} · ${esc(x['Asesor']||'')}${x['Sync Count']?' · sync '+x['Sync Count']+'×':''}</div></div>
+        ${x['Folder Foto']?`<a href="${x['Folder Foto']}" target="_blank" class="btn btn-ghost btn-sm">📷</a>`:''}
+        <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${x['Nilai Akhir']?Number(x['Nilai Akhir']).toFixed(2):'—'}</span></div>`;
+    }).join('')}`;
+}
 
 function admData(){
   const used=storageUsage(),pct=Math.min(100,Math.round(used/(5*1024*1024)*100));
@@ -715,12 +986,38 @@ function admData(){
     <p class="hint">Data tersimpan di perangkat ini saja. Backup berkala agar tidak hilang.</p>
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="backupData()">⬇ Unduh Backup (JSON)</button>
     <label class="btn btn-ghost btn-block" style="margin-bottom:10px">⬆ Pulihkan dari Backup<input type="file" accept=".json" style="display:none" onchange="restoreData(this)"></label>
+    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="syncSeed()">↻ Perbarui Klausul dari Seed (aman, data tetap)</button>
     <button class="btn btn-danger btn-block" onclick="resetData()">⟲ Reset ke Data Awal</button>
-  </div>`;
+  </div>
+  ${SYNC_URL?`<div class="card"><h2>Sinkronisasi Form (Online)</h2>
+    <p class="hint">Sebarkan perubahan area & klausul ke SEMUA asesor. Mereka dapat versi terbaru saat membuka app dalam keadaan online. Versi form saat ini: <b>v${STORE.config.version||1}</b>.</p>
+    <button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Form ke Semua Asesor</button>
+    <p class="hint" style="margin-top:8px;margin-bottom:0">⚠️ Pastikan form sudah benar sebelum sinkron — perubahan langsung kena ke semua. Versi naik otomatis tiap sinkron.</p>
+  </div>`:''}`;
+}
+function pushConfig(){
+  if(!SYNC_URL){toast('SYNC_URL belum diisi');return;}
+  if(!confirm('Sinkronkan form ke semua asesor? Versi form akan dinaikkan dan disebarkan. Pastikan form sudah benar.'))return;
+  // naikkan versi config
+  STORE.config.version=(STORE.config.version||1)+1;
+  saveStore();
+  toast('Mengirim form ke Google…');
+  fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:STORE.config})})
+    .then(r=>r.json()).then(out=>{
+      if(out.ok){toast('Form tersinkron ✓ versi '+(out.version||STORE.config.version));renderAdmin();}
+      else toast('Gagal: '+(out.error||'unknown'));
+    }).catch(e=>toast('Gagal kirim (sinyal?): '+e.message));
 }
 function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Backup diunduh');}
 function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data dipulihkan');renderAdmin();}catch(err){toast('File backup tidak valid');}};r.readAsText(f);}
 function resetData(){if(!confirm('Reset semua ke data awal? Assessment tersimpan akan hilang.'))return;localStorage.removeItem(LS_KEY);STORE=loadStore();saveStore();renderAdmin();toast('Data direset');}
+function syncSeed(){
+  if(!confirm('Perbarui daftar area & klausul ke versi seed terbaru? Assessment tersimpan TIDAK dihapus.'))return;
+  STORE.config=JSON.parse(JSON.stringify(SEED_DATA));
+  STORE.sessions=STORE.sessions||[];
+  saveStore();renderAdmin();toast('Klausul diperbarui dari seed');
+}
 
 /* ---------- Warning sebelum nutup halaman saat mengisi ---------- */
 /* ============ TEMUAN & TINDAK LANJUT ============ */
@@ -730,7 +1027,7 @@ function findingsCard(d){
   const pctClose=f.length?Math.round(close/f.length*100):0;
   return `<div class="card">
     <h2>Temuan & Tindak Lanjut</h2>
-    <p class="hint">${f.length} temuan (otomatis dari jawaban "Tidak"). Bisa edit, tambah, atau hapus.</p>
+    <p class="hint">${f.length} temuan (otomatis dari aspek bernilai rendah ≤2). Bisa edit, tambah, atau hapus.</p>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div>
@@ -742,8 +1039,17 @@ function findingsCard(d){
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green)">${pctClose}%</div>
         <div style="font-size:11px;color:var(--muted);font-weight:700">% CLOSE</div></div>
     </div>
+    <button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" onclick="regenTemuan()">↻ Buat ulang temuan dari nilai (timpa temuan otomatis)</button>
     <button class="btn btn-primary btn-block" onclick="VIEW='findings';render()">Kelola Temuan →</button>
   </div>`;
+}
+function regenTemuan(){
+  if(isLocked())return lockBlock();
+  if(!confirm('Buat ulang temuan otomatis dari aspek bernilai ≤2? Temuan yang kamu tambah/edit manual akan tetap dipertahankan.'))return;
+  const auto=generateFindings(DRAFT);
+  const manual=(DRAFT.findings||[]).filter(f=>!f.auto); // simpan yang manual
+  DRAFT.findings=auto.concat(manual);
+  saveDraftSession();render();toast('Temuan diperbarui dari nilai');
 }
 
 function renderFindings(){
@@ -811,6 +1117,7 @@ function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,u
   inp.closest('.photo-row').innerHTML=`<img src="${url}" class="photo-thumb" onclick="efRmPhoto('${field}')">`;});}
 function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
 function saveFinding(id,isNew){
+  if(isLocked())return lockBlock();
   const d=DRAFT;d.findings=d.findings||[];
   const kat=$('#ef-kat').value;
   const obj={id,area:$('#ef-area').value,kategori:kat,r5:R5MAP[kat],
@@ -823,7 +1130,7 @@ function saveFinding(id,isNew){
   else{const i=d.findings.findIndex(f=>f.id===id);if(i>=0)d.findings[i]={...d.findings[i],...obj};}
   saveDraftSession();closeModal();renderFindings();toast('Temuan tersimpan');
 }
-function delFinding(id){if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan dihapus');}
+function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan dihapus');}
 
 /* ============ DASHBOARD ANALISIS ============ */
 let dashFilter={pu:'',periode:'',status:''};
