@@ -11,7 +11,7 @@ const ASESOR_PASS='asesor';
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbwXMjggh6qMX1ABai2kKY33WM_38Jl5gXyBIh8KATeFrfJt2tLtE1E351Dk7KYx_ZMAAg/exec';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbzR0WdP_vZ5XF-lUX5l7uFu43EwnLV1ltAOmzcUH6WX-AjS6ivfl8TEK1ih5g5qraWZeg/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* ---------- Store ---------- */
