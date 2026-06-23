@@ -446,10 +446,10 @@ function renderAssessBody(){
     const akey=`${areaId}|${asp}`;
     const photos=d.photos[akey]||[];
     html+=`<div class="finding">
-      <div class="finding-lbl">Temuan & foto — ${asp}</div>
+      <div class="finding-lbl">Temuan & foto — ${asp} <span style="color:var(--muted);font-weight:400">(${photos.length}/5)</span></div>
       <div class="photo-row">
         ${photos.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
-        ${photos.length<1?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
+        ${photos.length<5?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
       </div>
       <textarea class="note-input" placeholder="Catatan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
     </div>`;
@@ -505,7 +505,7 @@ function addAreaToSession(areaId){
   DRAFT.curArea=DRAFT.areas.length; // step = area index(N-1)+1 = N, jump ke area baru
   saveDraftLite();closeModal();renderAssess();toast('Area ditambahkan');
 }
-function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto per aspek');return;}handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
 function rmPhoto(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
 /* ---------- Auto-save draft ---------- */
@@ -606,9 +606,9 @@ function buildSyncPayload(rec){
     }))};
 }
 async function syncSession(id){
-  if(!SYNC_URL){toast('SYNC_URL belum diisi (lihat panduan Fase 2)');return;}
+  if(!SYNC_URL){alert('SYNC_URL belum diisi (lihat panduan Fase 2).');return;}
   const rec=STORE.sessions.find(s=>s.id===id);
-  if(!rec){toast('Sesi tidak ditemukan');return;}
+  if(!rec){alert('Sesi tidak ditemukan.');return;}
   toast('Mengirim ke Google…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',
@@ -618,18 +618,19 @@ async function syncSession(id){
     if(out.ok){
       rec.synced=true;rec.syncedAt=new Date().toISOString();rec.locked=true;
       rec.syncCount=out.syncCount||((rec.syncCount||0)+1);saveStore();
-      toast(`Terkirim ✓ ${out.photos||0} foto · terkunci`);
+      alert('✓ BERHASIL TERKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nFoto terkirim: '+(out.photos||0)+'\n\nSesi ini sekarang terkunci (read-only).');
       if(VIEW==='admin')renderAdmin();
       if(VIEW==='report')render();
-    }else toast('Gagal: '+(out.error||'unknown'));
-  }catch(e){toast('Gagal kirim (sinyal?): '+e.message);}
+    }else alert('✗ GAGAL mengirim.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('✗ GAGAL mengirim (cek sinyal/koneksi).\n\nDetail: '+e.message);}
 }
 async function syncAllUnsynced(){
-  if(!SYNC_URL){toast('SYNC_URL belum diisi');return;}
+  if(!SYNC_URL){alert('SYNC_URL belum diisi.');return;}
   const pending=STORE.sessions.filter(s=>!s.synced);
-  if(!pending.length){toast('Semua sudah ter-sync');return;}
+  if(!pending.length){alert('Semua data sudah ter-sync ke Google.');return;}
+  if(!confirm('Kirim '+pending.length+' assessment yang belum ter-sync ke Google?'))return;
   toast(`Mengirim ${pending.length} sesi…`);
-  let ok=0;
+  let ok=0,gagal=0;
   for(const s of pending){
     try{
       const res=await fetch(SYNC_URL,{method:'POST',
@@ -637,9 +638,11 @@ async function syncAllUnsynced(){
         body:JSON.stringify(buildSyncPayload(s))});
       const out=await res.json();
       if(out.ok){s.synced=true;s.syncedAt=new Date().toISOString();s.locked=true;s.syncCount=out.syncCount||((s.syncCount||0)+1);ok++;}
-    }catch(e){}
+      else gagal++;
+    }catch(e){gagal++;}
   }
-  saveStore();renderAdmin();toast(`Selesai: ${ok}/${pending.length} terkirim`);
+  saveStore();renderAdmin();
+  alert('SELESAI MENGIRIM\n\nBerhasil: '+ok+'\nGagal: '+gagal+(gagal?'\n\nYang gagal bisa dicoba lagi nanti.':''));
 }
 
 /* ---------- REPORT ---------- */
@@ -1018,7 +1021,7 @@ function admData(){
   </div>`:''}`;
 }
 function pushConfig(){
-  if(!SYNC_URL){toast('SYNC_URL belum diisi');return;}
+  if(!SYNC_URL){alert('SYNC_URL belum diisi.');return;}
   if(!confirm('Sinkronkan form ke semua asesor? Versi form akan dinaikkan dan disebarkan. Pastikan form sudah benar.'))return;
   // naikkan versi config
   STORE.config.version=(STORE.config.version||1)+1;
@@ -1027,9 +1030,13 @@ function pushConfig(){
   fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:STORE.config})})
     .then(r=>r.json()).then(out=>{
-      if(out.ok){toast('Form tersinkron ✓ versi '+(out.version||STORE.config.version));renderAdmin();}
-      else toast('Gagal: '+(out.error||'unknown'));
-    }).catch(e=>toast('Gagal kirim (sinyal?): '+e.message));
+      if(out.ok){
+        alert('✓ BERHASIL\n\nForm & target sudah disinkronkan ke versi '+(out.version||STORE.config.version)+'.\n\nSemua asesor akan mendapat pembaruan saat membuka aplikasi dalam keadaan online.');
+        renderAdmin();
+      }else{
+        alert('✗ GAGAL menyinkronkan form.\n\nPenyebab: '+(out.error||'tidak diketahui')+'\n\nSilakan coba lagi.');
+      }
+    }).catch(e=>alert('✗ GAGAL mengirim (cek sinyal/koneksi).\n\nDetail: '+e.message));
 }
 function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Backup diunduh');}
 function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data dipulihkan');renderAdmin();}catch(err){toast('File backup tidak valid');}};r.readAsText(f);}
@@ -1299,8 +1306,8 @@ async function loadDashCloud(){
   }catch(e){toast('Gagal ambil (sinyal?): '+e.message);}
 }
 async function updateFindingStatus(id,status){
-  if(getAuth().role!=='admin'){toast('Hanya admin yang bisa ubah status');return;}
-  if(!SYNC_URL){toast('Sync belum aktif');return;}
+  if(getAuth().role!=='admin'){alert('Hanya admin yang bisa ubah status.');return;}
+  if(!SYNC_URL){alert('Sync belum aktif.');return;}
   toast('Menyimpan status…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
@@ -1308,9 +1315,9 @@ async function updateFindingStatus(id,status){
     const out=await res.json();
     if(out.ok){
       (_dashCloudData||[]).forEach(t=>{if((t['ID Temuan']||t['id'])===id)t['Status']=status;});
-      toast('Status → '+status);renderDashboard();
-    }else toast('Gagal: '+(out.error||'unknown'));
-  }catch(e){toast('Gagal simpan (sinyal?): '+e.message);}
+      alert('✓ Status temuan diubah ke "'+status+'" dan tersimpan ke Google.');renderDashboard();
+    }else alert('✗ GAGAL ubah status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('✗ GAGAL simpan (cek sinyal).\n\nDetail: '+e.message);}
 }
 function _cloudFindingById(id){
   return (_dashCloudData||[]).find(t=>(t['ID Temuan']||t['id'])===id);
@@ -1363,9 +1370,9 @@ async function saveCloudFinding(id){
       // update cache lokal
       const t=_cloudFindingById(id);
       if(t)Object.keys(payload.fields).forEach(k=>{t[k]=payload.fields[k];});
-      closeModal();toast('Temuan tersimpan ✓');renderDashboard();
-    }else toast('Gagal: '+(out.error||'unknown'));
-  }catch(e){toast('Gagal simpan (sinyal?): '+e.message);}
+      closeModal();alert('✓ Temuan berhasil disimpan ke Google.');renderDashboard();
+    }else alert('✗ GAGAL simpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('✗ GAGAL simpan (cek sinyal).\n\nDetail: '+e.message);}
 }
 function renderDashboard(){
   const auth=getAuth();
