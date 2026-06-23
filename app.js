@@ -941,11 +941,13 @@ function admTarget(){
   pus.forEach(pu=>{
     const locs=Object.keys(STORE.config.matrix[pu]||{});
     if(!locs.length)return;
-    html+=`<div class="card"><h2 style="font-size:16px">${esc(pu)} · target PU ${targetPU(pu)?targetPU(pu).toFixed(2):'—'}</h2>`;
+    const nKosong=locs.filter(l=>!(targetLoc(pu,l)>0)).length;
+    html+=`<div class="card"><h2 style="font-size:16px">${esc(pu)} · target PU ${targetPU(pu)?targetPU(pu).toFixed(2):'—'}${nKosong?` <span style="font-size:11px;font-weight:800;color:var(--amber)">(${nKosong} belum diisi)</span>`:''}</h2>`;
     locs.forEach(loc=>{
       const val=targetLoc(pu,loc);
-      html+=`<div class="list-row"><div class="nm">${esc(loc)}</div>
-        <input class="input" type="number" min="1" max="5" step="0.1" value="${val}" style="width:80px;text-align:center"
+      const kosong=!(val>0);
+      html+=`<div class="list-row" style="${kosong?'border-color:var(--amber);background:#FFF9EC':''}"><div class="nm">${esc(loc)}${kosong?' <span style="font-size:10px;font-weight:800;color:var(--amber);text-transform:uppercase;letter-spacing:.04em">• belum diisi</span>':''}</div>
+        <input class="input" type="number" min="1" max="5" step="0.01" value="${val||''}" placeholder="—" style="width:80px;text-align:center;${kosong?'border-color:var(--amber)':''}"
           onchange="setTarget('${esc(pu)}','${esc(loc)}',this.value)"></div>`;
     });
     html+=`</div>`;
@@ -959,7 +961,7 @@ function admTarget(){
 function setTarget(pu,loc,v){
   const n=parseFloat(v);
   if(isNaN(n)||n<1||n>5){toast('Target harus 1–5');renderAdmin();return;}
-  STORE.config.targets[pu+'::'+loc]=Math.round(n*10)/10;
+  STORE.config.targets[pu+'::'+loc]=Math.round(n*100)/100;
   STORE.config._dirty=true;
   saveStore();renderAdmin();
 }
