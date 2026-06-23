@@ -142,6 +142,8 @@ window.addEventListener('DOMContentLoaded',()=>{render();checkRemoteConfig();});
 /* ===== FITUR 3: tarik config terbaru dari Google (kalau online) ===== */
 async function checkRemoteConfig(){
   if(!SYNC_URL)return; // offline mode / belum setup
+  // JANGAN timpa kalau admin punya editan lokal yang belum di-sync
+  if(STORE.config&&STORE.config._dirty)return;
   try{
     const res=await fetch(SYNC_URL+'?action=config');
     const out=await res.json();
@@ -810,8 +812,9 @@ function admArea(){
 }
 function syncConfigBtn(){
   if(!SYNC_URL)return '';
-  return `<div class="card" style="background:#F4F8F5">
-    <p class="hint" style="margin-bottom:8px">Setelah ubah form/area/target, sebarkan ke semua asesor. Versi form saat ini: <b>v${STORE.config.version||1}</b>.</p>
+  const dirty=STORE.config&&STORE.config._dirty;
+  return `<div class="card" style="background:${dirty?'#FEF9EC':'#F4F8F5'};${dirty?'border-color:#F5DFA0':''}">
+    ${dirty?'<p class="hint" style="margin-bottom:8px;color:#9A6B00;font-weight:700">⚠️ Ada perubahan yang BELUM disinkronkan. Asesor belum dapat versi terbaru.</p>':`<p class="hint" style="margin-bottom:8px">Form sudah tersinkron. Versi saat ini: <b>v${STORE.config.version||1}</b>.</p>`}
     <button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Form ke Semua Asesor</button>
   </div>`;
 }
@@ -845,7 +848,7 @@ function saveArea(id,isNew){
   ASPECTS.forEach(asp=>{aspects[asp]=Array.from(document.querySelectorAll(`#ea-${asp} textarea`)).map(t=>t.value.trim()).filter(Boolean);});
   if(isNew){STORE.config.areaChecks.push({id:id,name,aspects});}
   else{const a=STORE.config.areaChecks.find(x=>x.id===id);a.name=name;a.aspects=aspects;}
-  saveStore();closeModal();renderAdmin();toast('Area tersimpan');
+  STORE.config._dirty=true;saveStore();closeModal();renderAdmin();toast('Area tersimpan');
 }
 function delArea(id){if(!confirm('Hapus area check ini? Item assessment terkait akan hilang.'))return;
   STORE.config.areaChecks=STORE.config.areaChecks.filter(a=>a.id!==id);
@@ -853,7 +856,7 @@ function delArea(id){if(!confirm('Hapus area check ini? Item assessment terkait 
   Object.keys(STORE.config.matrix).forEach(pu=>Object.keys(STORE.config.matrix[pu]).forEach(loc=>{
     STORE.config.matrix[pu][loc]=STORE.config.matrix[pu][loc].filter(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return !!a;});
   }));
-  saveStore();renderAdmin();toast('Area dihapus');
+  STORE.config._dirty=true;saveStore();renderAdmin();toast('Area dihapus');
 }
 function closeModal(){$('#modal-root').innerHTML='';}
 
@@ -883,10 +886,12 @@ function toggleArea(pu,loc,areaId,on){
   const a=STORE.config.areaChecks.find(x=>x.id===areaId);if(!a)return;
   let arr=STORE.config.matrix[pu][loc]||[];
   if(on){if(!arr.includes(a.name))arr.push(a.name);}else{arr=arr.filter(n=>n!==a.name);}
-  STORE.config.matrix[pu][loc]=arr;saveStore();
+  STORE.config.matrix[pu][loc]=arr;
+  STORE.config._dirty=true; // tandai ada perubahan lokal belum di-sync
+  saveStore();
 }
-function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];saveStore();renderAdmin();}
-function delLoc(loc){if(!confirm('Hapus lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];saveStore();renderAdmin();}
+function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];STORE.config._dirty=true;saveStore();renderAdmin();}
+function delLoc(loc){if(!confirm('Hapus lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];STORE.config._dirty=true;saveStore();renderAdmin();}
 
 /* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
 function targetLoc(pu,loc){const t=STORE.config.targets||{};return t[pu+'::'+loc]||0;}
@@ -937,6 +942,7 @@ function setTarget(pu,loc,v){
   const n=parseFloat(v);
   if(isNaN(n)||n<1||n>5){toast('Target harus 1–5');renderAdmin();return;}
   STORE.config.targets[pu+'::'+loc]=Math.round(n*10)/10;
+  STORE.config._dirty=true;
   saveStore();renderAdmin();
 }
 
@@ -1032,8 +1038,9 @@ function admData(){
 function pushConfig(){
   if(!SYNC_URL){alert('SYNC_URL belum diisi.');return;}
   if(!confirm('Sinkronkan form ke semua asesor? Versi form akan dinaikkan dan disebarkan. Pastikan form sudah benar.'))return;
-  // naikkan versi config
+  // naikkan versi config & bersihkan tanda dirty (perubahan ini yang jadi sumber kebenaran)
   STORE.config.version=(STORE.config.version||1)+1;
+  delete STORE.config._dirty;
   saveStore();
   toast('Mengirim form ke Google…');
   fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
