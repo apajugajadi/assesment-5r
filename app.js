@@ -907,9 +907,27 @@ function targetNasional(){
 }
 function admTarget(){
   STORE.config.targets=STORE.config.targets||{};
+  STORE.config.weights=STORE.config.weights||{midYear:35,endYear:65};
+  const w=STORE.config.weights;
+  const totalW=(Number(w.midYear)||0)+(Number(w.endYear)||0);
+  const wOk=totalW===100;
   const pus=Object.keys(STORE.config.matrix);
   const nas=targetNasional();
-  let html=`<div class="card"><h2>Target Nilai per Lokasi</h2>
+  let html=`<div class="card"><h2>Bobot Nilai Final</h2>
+    <p class="hint">Nilai final = (Mid Year × bobot) + (End Year × bobot). Total harus 100%.</p>
+    <div style="display:flex;gap:10px">
+      <label class="field" style="flex:1"><span class="lbl">Bobot Mid Year (%)</span>
+        <input class="input" type="number" min="0" max="100" step="1" value="${w.midYear}" style="text-align:center"
+          onchange="setWeight('midYear',this.value)"></label>
+      <label class="field" style="flex:1"><span class="lbl">Bobot End Year (%)</span>
+        <input class="input" type="number" min="0" max="100" step="1" value="${w.endYear}" style="text-align:center"
+          onchange="setWeight('endYear',this.value)"></label>
+    </div>
+    <div style="padding:10px;border-radius:10px;text-align:center;font-weight:700;font-size:13px;background:${wOk?'#EAF5EC':'#FBEEEC'};color:${wOk?'var(--green)':'var(--red)'}">
+      ${wOk?'✓ Total bobot 100% — valid':'⚠️ Total bobot = '+totalW+'% — HARUS 100%! Perbaiki sebelum dipakai.'}
+    </div>
+  </div>
+  <div class="card"><h2>Target Nilai per Lokasi</h2>
     <p class="hint">Atur target nilai (1–5) tiap lokasi/zona. Target PU & Nasional dihitung otomatis (rata-rata lokasi).</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       ${pus.map(pu=>{const tp=targetPU(pu);return `<div style="flex:1;min-width:90px;text-align:center;padding:10px;background:var(--concrete);border-radius:10px">
@@ -942,6 +960,14 @@ function setTarget(pu,loc,v){
   const n=parseFloat(v);
   if(isNaN(n)||n<1||n>5){toast('Target harus 1–5');renderAdmin();return;}
   STORE.config.targets[pu+'::'+loc]=Math.round(n*10)/10;
+  STORE.config._dirty=true;
+  saveStore();renderAdmin();
+}
+function setWeight(which,v){
+  const n=parseFloat(v);
+  if(isNaN(n)||n<0||n>100){toast('Bobot harus 0–100');renderAdmin();return;}
+  STORE.config.weights=STORE.config.weights||{midYear:35,endYear:65};
+  STORE.config.weights[which]=Math.round(n);
   STORE.config._dirty=true;
   saveStore();renderAdmin();
 }
@@ -1203,62 +1229,169 @@ function drawDashNilai(){
   const rows=_dashNilaiData||[];
   if(!rows.length){b.innerHTML='<div class="empty"><div class="ic">📊</div>Belum ada data ter-sync.</div>';return;}
 
-  // nilai lokasi = Nilai Akhir per baris (ambil terbaru kalau dobel)
-  const byLoc={};
+  const w=STORE.config.weights||{midYear:35,endYear:65};
+  const wMid=(Number(w.midYear)||0)/100, wEnd=(Number(w.endYear)||0)/100;
+
+  // nilai lokasi per PERIODE (Mid/End). key: PU::loc::periode
+  const byLocPer={};
   rows.forEach(x=>{
     const pu=x['PU'],loc=x['Lokasi'];if(!pu||!loc)return;
-    byLoc[pu+'::'+loc]={pu,loc,nilai:Number(x['Nilai Akhir'])||0};
+    const per=(x['Periode']||'').toLowerCase().indexOf('end')>=0?'end':'mid';
+    byLocPer[pu+'::'+loc+'::'+per]={pu,loc,per,nilai:Number(x['Nilai Akhir'])||0};
   });
-  const locList=Object.values(byLoc);
-  const puMap={};locList.forEach(o=>{(puMap[o.pu]=puMap[o.pu]||[]).push(o);});
-  const puRows=Object.keys(puMap).map(pu=>{
-    const vals=puMap[pu].map(o=>o.nilai).filter(v=>v>0);
-    return {pu,nilai:vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0,target:targetPU(pu)};
+  // nilai PU per periode
+  function puNilaiPeriode(pu,per){
+    const locs=Object.keys(STORE.config.matrix[pu]||{});
+    const vals=locs.map(l=>{const o=byLocPer[pu+'::'+l+'::'+per];return o?o.nilai:0;}).filter(v=>v>0);
+    return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
+  }
+  // nilai final tertimbang PU: kalau End belum ada -> tampilkan Mid apa adanya
+  function puFinal(pu){
+    const mid=puNilaiPeriode(pu,'mid'), end=puNilaiPeriode(pu,'end');
+    if(mid>0 && end>0) return {final:mid*wMid+end*wEnd, mid, end, lengkap:true};
+    if(end>0) return {final:end, mid, end, lengkap:false};
+    return {final:mid, mid, end, lengkap:false};
+  }
+  const pus=Object.keys(STORE.config.matrix).filter(pu=>{
+    return Object.keys(STORE.config.matrix[pu]||{}).some(l=>byLocPer[pu+'::'+l+'::mid']||byLocPer[pu+'::'+l+'::end']);
   });
-  const nasNilai=puRows.length?puRows.reduce((s,p)=>s+p.nilai,0)/puRows.length:0;
+  const puRows=pus.map(pu=>{const f=puFinal(pu);return {pu,...f,target:targetPU(pu)};});
+  const nasFinal=puRows.length?puRows.reduce((s,p)=>s+p.final,0)/puRows.length:0;
+  const nasMid=puRows.length?puRows.reduce((s,p)=>s+p.mid,0)/puRows.length:0;
+  const nasEnd=puRows.length?puRows.reduce((s,p)=>s+p.end,0)/puRows.length:0;
   const nasTarget=targetNasional();
+  const semuaLengkap=puRows.every(p=>p.lengkap);
 
-  // #1 — cek lokasi yang ADA realisasi TAPI target kosong
-  const tanpaTarget=locList.filter(o=>o.nilai>0 && !targetLoc(o.pu,o.loc));
+  // warning target kosong
+  const allLoc=Object.values(byLocPer);
+  const tanpaTarget=[...new Set(allLoc.filter(o=>o.nilai>0 && !targetLoc(o.pu,o.loc)).map(o=>o.pu+' — '+o.loc))];
   let warnHtml='';
   if(tanpaTarget.length){
     warnHtml=`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0">
       <div style="display:flex;gap:10px;align-items:flex-start">
         <span style="font-size:20px">⚠️</span>
         <div><div style="font-weight:800;font-size:14px;margin-bottom:4px">Sebagian target nilai belum ditetapkan</div>
-        <div style="font-size:13px;color:var(--muted)">Terdapat ${tanpaTarget.length} lokasi yang sudah memiliki realisasi namun belum memiliki target. Mohon lengkapi target terlebih dahulu pada menu <b>Kelola Form → Target Nilai</b> agar perbandingan realisasi terhadap target dapat ditampilkan secara akurat.</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:6px">Lokasi: ${tanpaTarget.map(o=>esc(o.pu+' — '+o.loc)).join(', ')}</div>
-        </div>
-      </div></div>`;
+        <div style="font-size:13px;color:var(--muted)">Terdapat ${tanpaTarget.length} lokasi yang sudah memiliki realisasi namun belum memiliki target. Mohon lengkapi target pada menu <b>Kelola Form → Target Nilai</b>.</div>
+        </div></div></div>`;
+  }
+  // warning bobot != 100
+  const totalW=(Number(w.midYear)||0)+(Number(w.endYear)||0);
+  let wWarn='';
+  if(totalW!==100){
+    wWarn=`<div class="card" style="background:#FBEEEC;border-color:#E6B0AA"><div style="font-weight:700;color:var(--red);font-size:13px">⚠️ Total bobot Mid+End = ${totalW}% (harus 100%). Nilai final mungkin tidak akurat. Perbaiki di Kelola Form → Target Nilai.</div></div>`;
   }
 
-  let html=warnHtml+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
-    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI NASIONAL</div>
-    <div style="font-family:Archivo;font-weight:800;font-size:46px;line-height:1;margin:4px 0">${nasNilai?nasNilai.toFixed(2):'—'}</div>
-    <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasNilai,nasTarget)}</div>
+  // ===== HERO: Nilai Final Tertimbang =====
+  let html=warnHtml+wWarn+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
+    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI FINAL NASIONAL ${semuaLengkap?'(TERTIMBANG)':'(SEMENTARA · Mid Year)'}</div>
+    <div style="font-family:Archivo;font-weight:800;font-size:46px;line-height:1;margin:4px 0">${nasFinal?nasFinal.toFixed(2):'—'}</div>
+    <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasFinal,nasTarget)}</div>
+    <div style="font-size:11px;opacity:.7;margin-top:8px">Mid Year: ${nasMid?nasMid.toFixed(2):'—'} (${w.midYear}%) · End Year: ${nasEnd?nasEnd.toFixed(2):'—'} (${w.endYear}%)</div>
   </div>`;
 
-  // scorecard per PU (kotak warna sesuai capai target)
+  // ===== Scorecard per PU =====
   html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
     ${puRows.map(p=>{
-      const ok=p.target&&p.nilai>=p.target;
+      const ok=p.target&&p.final>=p.target;
       const col=p.target?(ok?'var(--lime)':'var(--amber)'):'var(--green-400)';
       return `<div class="card" style="flex:1;min-width:100px;text-align:center;margin:0;padding:14px;border-top:3px solid ${col}">
-        <div style="font-family:Archivo;font-weight:800;font-size:26px;color:${col}">${p.nilai?p.nilai.toFixed(2):'—'}</div>
+        <div style="font-family:Archivo;font-weight:800;font-size:26px;color:${col}">${p.final?p.final.toFixed(2):'—'}</div>
         <div style="font-size:11px;color:var(--muted);font-weight:700">${esc(p.pu)}</div>
         <div style="font-size:10px;color:var(--muted)">target ${p.target?p.target.toFixed(2):'—'}</div>
       </div>`;}).join('')}
   </div>`;
 
-  html+=`<div class="card"><h2 style="font-size:16px">Nilai per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.nilai,target:p.target})))}</div>`;
+  // ===== TABEL KPI =====
+  html+=`<div class="card"><h2 style="font-size:16px">Tabel KPI — Realisasi vs Target</h2>
+    <table class="rep"><thead><tr><th>PU</th><th class="num">Mid</th><th class="num">End</th><th class="num">Final</th><th class="num">Target</th><th class="num">Capai</th></tr></thead><tbody>
+    ${puRows.map(p=>{
+      const pc=p.target?Math.round(p.final/p.target*100):0;
+      const ok=p.target&&p.final>=p.target;
+      return `<tr><td>${esc(p.pu)}</td>
+        <td class="num">${p.mid?p.mid.toFixed(2):'—'}</td>
+        <td class="num">${p.end?p.end.toFixed(2):'—'}</td>
+        <td class="num" style="font-weight:800">${p.final?p.final.toFixed(2):'—'}</td>
+        <td class="num">${p.target?p.target.toFixed(2):'—'}</td>
+        <td class="num" style="color:${ok?'var(--green)':'var(--red)'};font-weight:700">${p.target?pc+'%':'—'}</td></tr>`;
+    }).join('')}
+    <tr style="background:var(--concrete);font-weight:800"><td>NASIONAL</td>
+      <td class="num">${nasMid?nasMid.toFixed(2):'—'}</td>
+      <td class="num">${nasEnd?nasEnd.toFixed(2):'—'}</td>
+      <td class="num">${nasFinal?nasFinal.toFixed(2):'—'}</td>
+      <td class="num">${nasTarget?nasTarget.toFixed(2):'—'}</td>
+      <td class="num" style="color:${nasTarget&&nasFinal>=nasTarget?'var(--green)':'var(--red)'}">${nasTarget?Math.round(nasFinal/nasTarget*100)+'%':'—'}</td></tr>
+    </tbody></table></div>`;
 
-  puRows.forEach(p=>{
-    const locs=puMap[p.pu].map(o=>({label:o.loc,nilai:o.nilai,target:targetLoc(o.pu,o.loc)}));
-    html+=`<div class="card"><h2 style="font-size:16px">${esc(p.pu)} · ${p.nilai.toFixed(2)} <span style="font-size:12px;color:var(--muted);font-weight:600">(target ${p.target?p.target.toFixed(2):'—'})</span></h2>${barVsTarget(locs)}</div>`;
-  });
+  // ===== GRAFIK realisasi vs target (final per PU) =====
+  html+=`<div class="card"><h2 style="font-size:16px">Grafik Final vs Target per PU</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.final,target:p.target})))}</div>`;
+
+  // ===== SIMULASI =====
+  html+=`<div class="card"><h2 style="font-size:16px">🎯 Simulasi Target</h2>
+    <p class="hint">Hitung skenario nilai final. Bobot: Mid ${w.midYear}% · End ${w.endYear}%.</p>
+    <div class="seg" style="background:var(--concrete);margin-bottom:10px">
+      <button class="${SIM_MODE==='reverse'?'on':''}" style="color:${SIM_MODE==='reverse'?'#fff':'var(--muted)'};background:${SIM_MODE==='reverse'?'var(--green)':'transparent'}" onclick="SIM_MODE='reverse';drawDashNilai()">End butuh berapa?</button>
+      <button class="${SIM_MODE==='predict'?'on':''}" style="color:${SIM_MODE==='predict'?'#fff':'var(--muted)'};background:${SIM_MODE==='predict'?'var(--green)':'transparent'}" onclick="SIM_MODE='predict';drawDashNilai()">Prediksi final</button>
+    </div>
+    <label class="field"><span class="lbl">Pilih cakupan</span>
+      <select class="input" id="sim-scope">
+        <option value="nasional" ${SIM.scope==='nasional'?'selected':''}>Nasional</option>
+        ${pus.map(p=>`<option value="${esc(p)}" ${SIM.scope===p?'selected':''}>${esc(p)}</option>`).join('')}
+      </select></label>
+    ${SIM_MODE==='reverse'?`
+      <label class="field"><span class="lbl">Nilai Mid Year (aktual/asumsi)</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="cth 3.5"></label>
+      <label class="field"><span class="lbl">Target Final yang ingin dicapai</span><input class="input" id="sim-target" type="number" step="0.01" min="1" max="5" value="${SIM.target||''}" placeholder="cth 4.0"></label>
+      <button class="btn btn-primary btn-block" onclick="runSimReverse()">Hitung End Year yang dibutuhkan</button>
+    `:`
+      <label class="field"><span class="lbl">Nilai Mid Year</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="cth 3.5"></label>
+      <label class="field"><span class="lbl">Nilai End Year</span><input class="input" id="sim-end" type="number" step="0.01" min="1" max="5" value="${SIM.end||''}" placeholder="cth 4.2"></label>
+      <button class="btn btn-primary btn-block" onclick="runSimPredict()">Hitung nilai final</button>
+    `}
+    <div id="sim-result"></div>
+  </div>`;
 
   html+=`<div class="card"><button class="btn btn-ghost btn-block" onclick="loadDashNilai()">↻ Refresh dari Google</button></div>`;
   b.innerHTML=html;
+  // render hasil simulasi terakhir kalau ada
+  if(SIM.lastResult){$('#sim-result').innerHTML=SIM.lastResult;}
+}
+let SIM_MODE='reverse';
+let SIM={scope:'nasional',mid:'',end:'',target:'',lastResult:''};
+function _simWeights(){const w=STORE.config.weights||{midYear:35,endYear:65};return {wMid:(Number(w.midYear)||0)/100,wEnd:(Number(w.endYear)||0)/100,mp:w.midYear,ep:w.endYear};}
+function runSimReverse(){
+  const {wMid,wEnd,mp,ep}=_simWeights();
+  SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.target=$('#sim-target').value;
+  const mid=parseFloat(SIM.mid), tgt=parseFloat(SIM.target);
+  if(isNaN(mid)||isNaN(tgt)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Isi Mid Year & Target dulu.</div>';return;}
+  if(wEnd===0){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Bobot End Year 0%, tidak bisa dihitung.</div>';return;}
+  // final = mid*wMid + end*wEnd  =>  end = (target - mid*wMid)/wEnd
+  const endNeeded=(tgt-mid*wMid)/wEnd;
+  let note='',col='var(--green)';
+  if(endNeeded>5){note='⚠️ Tidak mungkin tercapai — butuh End Year > 5 (di luar skala).';col='var(--red)';}
+  else if(endNeeded<1){note='✓ Sudah pasti tercapai — bahkan End Year minimum (1) sudah melewati target.';col='var(--green)';}
+  else note='Untuk capai target final '+tgt.toFixed(2)+', End Year harus minimal segini.';
+  SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
+    <div style="font-size:11px;color:var(--muted);font-weight:700">END YEAR YANG DIBUTUHKAN (${esc(SIM.scope)})</div>
+    <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${col}">${endNeeded>5||endNeeded<1?(endNeeded>5?'>5':'<1'):endNeeded.toFixed(2)}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">${note}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ?×${ep}% = ${tgt.toFixed(2)}</div>
+  </div>`;
+  $('#sim-result').innerHTML=SIM.lastResult;
+}
+function runSimPredict(){
+  const {wMid,wEnd,mp,ep}=_simWeights();
+  SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.end=$('#sim-end').value;
+  const mid=parseFloat(SIM.mid), end=parseFloat(SIM.end);
+  if(isNaN(mid)||isNaN(end)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Isi Mid & End Year dulu.</div>';return;}
+  const final=mid*wMid+end*wEnd;
+  const tgt=SIM.scope==='nasional'?targetNasional():targetPU(SIM.scope);
+  const ok=tgt&&final>=tgt;
+  SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
+    <div style="font-size:11px;color:var(--muted);font-weight:700">PREDIKSI NILAI FINAL (${esc(SIM.scope)})</div>
+    <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${tgt?(ok?'var(--green)':'var(--red)'):'var(--ink)'}">${final.toFixed(2)}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">${tgt?(ok?'✓ Mencapai target '+tgt.toFixed(2):'✗ Di bawah target '+tgt.toFixed(2)):'(target belum diisi)'}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ${end.toFixed(2)}×${ep}% = ${final.toFixed(2)}</div>
+  </div>`;
+  $('#sim-result').innerHTML=SIM.lastResult;
 }
 function vsTarget(nilai,target){
   if(!target||!nilai)return '';
