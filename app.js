@@ -303,15 +303,31 @@ function renderHome(){
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
           <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
-          <div class="st">${esc(s.periode||"")} · ${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
+          <div class="st">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <span class="chev">›</span></div>`;
       }).join('')}
+      <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">🗑 Hapus Data di Perangkat Ini</button>
     </div>`:''}
 
     ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Form & Item Audit</button>`:''}
     <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">📊 Dashboard Analisis Temuan</button>
   </div>`;
+}
+
+function clearMyData(){
+  const unsynced=STORE.sessions.filter(s=>!s.synced).length;
+  if(unsynced>0){
+    if(!confirm(`⚠️ PERINGATAN: ada ${unsynced} assessment yang BELUM terkirim ke Google.\n\nKalau dihapus sekarang, data itu HILANG PERMANEN dan tidak bisa dikembalikan.\n\nDisarankan kirim dulu (☁) sebelum hapus. Tetap hapus?`))return;
+    if(!confirm(`Yakin? ${unsynced} data yang belum terkirim akan benar-benar hilang.`))return;
+  }else{
+    if(!confirm('Hapus semua data assessment di perangkat ini? Semua sudah terkirim ke Google, jadi aman.'))return;
+  }
+  STORE.sessions=[];
+  clearDraft();
+  saveStore();
+  toast('Data di perangkat ini dihapus');
+  renderHome();
 }
 
 function startAssess(){
