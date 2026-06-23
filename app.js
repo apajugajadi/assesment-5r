@@ -166,6 +166,7 @@ function render(){
   if(VIEW==='report'&&DRAFT){renderReport();return;}
   if(VIEW==='findings'&&DRAFT){renderFindings();return;}
   if(VIEW==='dashboard'){renderDashboard();return;}
+  if(VIEW==='dashnilai'){renderDashNilai();return;}
   renderHome();
 }
 
@@ -236,7 +237,8 @@ function openDrawer(){
     </div>
     <div class="drawer-nav">
       <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
-      <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">📊</span> Dashboard Analisis Temuan</button>
+      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>`:''}
+      <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
       ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Draft</button>`:''}
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Form & Item Audit</button>`:''}
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
@@ -301,31 +303,15 @@ function renderHome(){
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
           <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
-          <div class="st">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
+          <div class="st">${esc(s.periode||"")} · ${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <span class="chev">›</span></div>`;
       }).join('')}
-      <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">🗑 Hapus Data di Perangkat Ini</button>
     </div>`:''}
 
     ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Form & Item Audit</button>`:''}
     <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">📊 Dashboard Analisis Temuan</button>
   </div>`;
-}
-
-function clearMyData(){
-  const unsynced=STORE.sessions.filter(s=>!s.synced).length;
-  if(unsynced>0){
-    if(!confirm(`⚠️ PERINGATAN: ada ${unsynced} assessment yang BELUM terkirim ke Google.\n\nKalau dihapus sekarang, data itu HILANG PERMANEN dan tidak bisa dikembalikan.\n\nDisarankan kirim dulu (☁) sebelum hapus. Tetap hapus?`))return;
-    if(!confirm(`Yakin? ${unsynced} data yang belum terkirim akan benar-benar hilang.`))return;
-  }else{
-    if(!confirm('Hapus semua data assessment di perangkat ini? Semua sudah terkirim ke Google, jadi aman.'))return;
-  }
-  STORE.sessions=[];
-  clearDraft();
-  saveStore();
-  toast('Data di perangkat ini dihapus');
-  renderHome();
 }
 
 function startAssess(){
@@ -595,7 +581,13 @@ function buildSyncPayload(rec){
     });
   });
   return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
-    predikat:rep.grade.label,record:rec,detail};
+    predikat:rep.grade.label,record:rec,detail,
+    findings:(rec.findings||[]).map(f=>({
+      id:f.id,area:f.area,kategori:f.kategori,skor:f.skor||'',
+      deskripsi:f.deskripsi||'',saran:f.saran||'',target:f.target||'',
+      deskPerbaikan:f.deskPerbaikan||'',tglPerbaikan:f.tglPerbaikan||'',
+      status:f.status||'Open',verifikator:f.verifikator||''
+    }))};
 }
 async function syncSession(id){
   if(!SYNC_URL){toast('SYNC_URL belum diisi (lihat panduan Fase 2)');return;}
@@ -773,7 +765,6 @@ function renderAdmin(){
       <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Form per Lokasi</button>
       <button class="${ADMIN_TAB==='target'?'on':''}" onclick="ADMIN_TAB='target';renderAdmin()">Target Nilai</button>
       <button class="${ADMIN_TAB==='sessions'?'on':''}" onclick="ADMIN_TAB='sessions';renderAdmin()">Data Tersimpan</button>
-      ${SYNC_URL?`<button class="${ADMIN_TAB==='pantau'?'on':''}" onclick="ADMIN_TAB='pantau';renderAdmin()">Pantau Semua</button>`:''}
       <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Backup</button>
     </div>
     <div id="adm-body"></div>
@@ -784,7 +775,6 @@ function renderAdmin(){
   else if(ADMIN_TAB==='matrix')b.innerHTML=admMatrix();
   else if(ADMIN_TAB==='target')b.innerHTML=admTarget();
   else if(ADMIN_TAB==='sessions')b.innerHTML=admSessions();
-  else if(ADMIN_TAB==='pantau'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div>';loadPantau();}
   else b.innerHTML=admData();
 }
 function admArea(){
@@ -1148,10 +1138,119 @@ function saveFinding(id,isNew){
 }
 function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan dihapus');}
 
+/* ============ DASHBOARD NILAI (narik cloud, admin) ============ */
+let _dashNilaiData=null;
+function renderDashNilai(){
+  app().innerHTML=topbar('Dashboard Nilai','Realisasi vs Target — dari Google')+`
+  <div class="wrap" id="dn-body">
+    <div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div>
+  </div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
+  loadDashNilai();
+}
+async function loadDashNilai(){
+  const b=$('#dn-body');if(!b)return;
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sync belum diaktifkan.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=list&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    _dashNilaiData=out.assessments||[];
+    drawDashNilai();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal ambil data (sinyal?).<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashNilai()">Coba lagi</button></div>`;}
+}
+function drawDashNilai(){
+  const b=$('#dn-body');if(!b)return;
+  const rows=_dashNilaiData||[];
+  if(!rows.length){b.innerHTML='<div class="empty"><div class="ic">📊</div>Belum ada data ter-sync.</div>';return;}
+
+  // nilai lokasi = Nilai Akhir per baris (ambil terbaru kalau dobel)
+  const byLoc={};
+  rows.forEach(x=>{
+    const pu=x['PU'],loc=x['Lokasi'];if(!pu||!loc)return;
+    byLoc[pu+'::'+loc]={pu,loc,nilai:Number(x['Nilai Akhir'])||0};
+  });
+  const locList=Object.values(byLoc);
+  const puMap={};locList.forEach(o=>{(puMap[o.pu]=puMap[o.pu]||[]).push(o);});
+  const puRows=Object.keys(puMap).map(pu=>{
+    const vals=puMap[pu].map(o=>o.nilai).filter(v=>v>0);
+    return {pu,nilai:vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0,target:targetPU(pu)};
+  });
+  const nasNilai=puRows.length?puRows.reduce((s,p)=>s+p.nilai,0)/puRows.length:0;
+  const nasTarget=targetNasional();
+
+  // #1 — cek lokasi yang ADA realisasi TAPI target kosong
+  const tanpaTarget=locList.filter(o=>o.nilai>0 && !targetLoc(o.pu,o.loc));
+  let warnHtml='';
+  if(tanpaTarget.length){
+    warnHtml=`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="font-size:20px">⚠️</span>
+        <div><div style="font-weight:800;font-size:14px;margin-bottom:4px">Sebagian target nilai belum ditetapkan</div>
+        <div style="font-size:13px;color:var(--muted)">Terdapat ${tanpaTarget.length} lokasi yang sudah memiliki realisasi namun belum memiliki target. Mohon lengkapi target terlebih dahulu pada menu <b>Kelola Form → Target Nilai</b> agar perbandingan realisasi terhadap target dapat ditampilkan secara akurat.</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px">Lokasi: ${tanpaTarget.map(o=>esc(o.pu+' — '+o.loc)).join(', ')}</div>
+        </div>
+      </div></div>`;
+  }
+
+  let html=warnHtml+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
+    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI NASIONAL</div>
+    <div style="font-family:Archivo;font-weight:800;font-size:46px;line-height:1;margin:4px 0">${nasNilai?nasNilai.toFixed(2):'—'}</div>
+    <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasNilai,nasTarget)}</div>
+  </div>`;
+
+  html+=`<div class="card"><h2 style="font-size:16px">Nilai per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.nilai,target:p.target})))}</div>`;
+
+  puRows.forEach(p=>{
+    const locs=puMap[p.pu].map(o=>({label:o.loc,nilai:o.nilai,target:targetLoc(o.pu,o.loc)}));
+    html+=`<div class="card"><h2 style="font-size:16px">${esc(p.pu)} · ${p.nilai.toFixed(2)} <span style="font-size:12px;color:var(--muted);font-weight:600">(target ${p.target?p.target.toFixed(2):'—'})</span></h2>${barVsTarget(locs)}</div>`;
+  });
+
+  html+=`<div class="card"><button class="btn btn-ghost btn-block" onclick="loadDashNilai()">↻ Refresh dari Google</button></div>`;
+  b.innerHTML=html;
+}
+function vsTarget(nilai,target){
+  if(!target||!nilai)return '';
+  const d=nilai-target;
+  if(d>=0)return `<span style="color:#8FE3A0">▲ +${d.toFixed(2)} di atas target</span>`;
+  return `<span style="color:#F5B5AE">▼ ${d.toFixed(2)} di bawah target</span>`;
+}
+function barVsTarget(items){
+  if(!items.length)return '<p class="hint">Belum ada data.</p>';
+  return items.map(it=>{
+    const pct=Math.min(100,(it.nilai/5)*100);
+    const tpct=it.target?Math.min(100,(it.target/5)*100):0;
+    const ok=it.target&&it.nilai>=it.target;
+    const col=it.target?(ok?'var(--lime)':'var(--amber)'):'var(--green-400)';
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+        <span style="font-weight:600">${esc(it.label)}</span>
+        <span style="font-family:Archivo;font-weight:800;color:${col}">${it.nilai?it.nilai.toFixed(2):'—'}${it.target?` <span style="color:var(--muted);font-weight:600;font-size:11px">/ ${it.target.toFixed(1)}</span>`:''}</span>
+      </div>
+      <div style="position:relative;height:14px;background:#E4EBE6;border-radius:99px">
+        <div style="height:100%;width:${pct}%;background:${col};border-radius:99px"></div>
+        ${it.target?`<div title="target" style="position:absolute;top:-3px;bottom:-3px;left:${tpct}%;width:2px;background:var(--ink)"></div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 /* ============ DASHBOARD ANALISIS ============ */
 let dashFilter={pu:'',periode:'',status:''};
+let DASH_SRC='local'; // 'local' | 'cloud'
+let _dashCloudData=null;
 function allFindings(){
-  // flatten findings dari semua sessions + konteks (pu, loc, periode, asesor)
+  if(DASH_SRC==='cloud'){
+    // dari Google: array temuan {PU,Lokasi,Periode,Asesor,Area,Kategori,Status,...}
+    return (_dashCloudData||[]).map(t=>({
+      id:t['ID Temuan']||t['id']||'', area:t['Area']||'', kategori:t['Kategori']||'',
+      deskripsi:t['Deskripsi']||'', saran:t['Saran']||'', target:t['Target']||'',
+      deskPerbaikan:t['Deskripsi Perbaikan']||'', tglPerbaikan:t['Tgl Perbaikan']||'',
+      status:t['Status']||'Open', verifikator:t['Verifikator']||'',
+      pu:t['PU']||'', loc:t['Lokasi']||'', periode:t['Periode']||'', asesor:t['Asesor']||'',
+      sessionId:t['ID Sesi']||''
+    }));
+  }
   const out=[];
   STORE.sessions.forEach(s=>{
     (s.findings||[]).forEach(f=>{
@@ -1159,6 +1258,32 @@ function allFindings(){
     });
   });
   return out;
+}
+async function loadDashCloud(){
+  if(!SYNC_URL){toast('Sync belum aktif');return;}
+  toast('Mengambil temuan dari Google…');
+  try{
+    const res=await fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){toast('Gagal: '+(out.error||'unknown'));return;}
+    _dashCloudData=out.findings||[];
+    renderDashboard();
+  }catch(e){toast('Gagal ambil (sinyal?): '+e.message);}
+}
+async function updateFindingStatus(id,status){
+  if(getAuth().role!=='admin'){toast('Hanya admin yang bisa ubah status');return;}
+  if(!SYNC_URL){toast('Sync belum aktif');return;}
+  toast('Menyimpan status…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'updateStatus',findingId:id,status})});
+    const out=await res.json();
+    if(out.ok){
+      // update lokal cache biar langsung keliatan
+      (_dashCloudData||[]).forEach(t=>{if((t['ID Temuan']||t['id'])===id)t['Status']=status;});
+      toast('Status → '+status);renderDashboard();
+    }else toast('Gagal: '+(out.error||'unknown'));
+  }catch(e){toast('Gagal simpan (sinyal?): '+e.message);}
 }
 function renderDashboard(){
   const auth=getAuth();
@@ -1184,6 +1309,12 @@ function renderDashboard(){
 
   app().innerHTML=topbar('Dashboard Temuan','Analisis 5R')+`
   <div class="wrap">
+    ${auth.role==='admin'&&SYNC_URL?`<div class="card" style="padding:10px">
+      <div class="seg" style="background:var(--concrete);margin:0">
+        <button class="${DASH_SRC==='local'?'on':''}" style="color:${DASH_SRC==='local'?'#fff':'var(--muted)'};background:${DASH_SRC==='local'?'var(--green)':'transparent'}" onclick="DASH_SRC='local';renderDashboard()">📱 Perangkat Ini</button>
+        <button class="${DASH_SRC==='cloud'?'on':''}" style="color:${DASH_SRC==='cloud'?'#fff':'var(--muted)'};background:${DASH_SRC==='cloud'?'var(--green)':'transparent'}" onclick="DASH_SRC='cloud';${_dashCloudData?'renderDashboard()':'loadDashCloud()'}">☁ Semua Asesor (Cloud)</button>
+      </div>
+    </div>`:''}
     <div class="card">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <select class="input" style="flex:1;min-width:110px" onchange="dashFilter.pu=this.value;renderDashboard()">
@@ -1195,7 +1326,7 @@ function renderDashboard(){
       </div>
     </div>
 
-    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data temuan.<br>Selesaikan assessment dulu.</div>':`
+    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data temuan.<br>'+(DASH_SRC==='cloud'?'Belum ada temuan ter-sync.':'Selesaikan assessment dulu.')+'</div>':`
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green)">${total}</div>
@@ -1221,7 +1352,16 @@ function renderDashboard(){
     <div class="card"><h2>Per Assessor</h2>
       ${dashTable(byAsesor,['Assessor','Temuan','Open','Close','% Close'])}</div>
 
-    <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">⬇ Unduh Rekap (CSV)</button></div>
+    ${DASH_SRC==='cloud'&&auth.role==='admin'?`<div class="card"><h2>Kelola Status Temuan</h2>
+      <p class="hint">Hanya admin yang dapat mengubah status (satu pintu). Perubahan tersimpan ke Google.</p>
+      ${F.map(x=>`<div class="list-row">
+        <div class="nm" style="flex:1">${esc(x.pu)} — ${esc(x.loc)} · ${esc(x.kategori)}
+          <div style="font-size:11px;color:var(--muted);font-weight:400">${esc((x.deskripsi||'').slice(0,80))}</div></div>
+        <button class="btn btn-sm ${x.status==='Close'?'btn-ghost':'btn-primary'}" onclick="updateFindingStatus('${esc(x.id)}','${x.status==='Open'?'Close':'Open'}')">${x.status==='Open'?'Tandai Close':'Buka lagi'}</button>
+      </div>`).join('')}
+    </div>`:''}
+
+    <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">⬇ Unduh Rekap (CSV)</button>${DASH_SRC==='cloud'?'<button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="loadDashCloud()">↻ Refresh dari Google</button>':''}</div>
     `}
   </div>
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
