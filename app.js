@@ -1199,6 +1199,18 @@ function drawDashNilai(){
     <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasNilai,nasTarget)}</div>
   </div>`;
 
+  // scorecard per PU (kotak warna sesuai capai target)
+  html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    ${puRows.map(p=>{
+      const ok=p.target&&p.nilai>=p.target;
+      const col=p.target?(ok?'var(--lime)':'var(--amber)'):'var(--green-400)';
+      return `<div class="card" style="flex:1;min-width:100px;text-align:center;margin:0;padding:14px;border-top:3px solid ${col}">
+        <div style="font-family:Archivo;font-weight:800;font-size:26px;color:${col}">${p.nilai?p.nilai.toFixed(2):'—'}</div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">${esc(p.pu)}</div>
+        <div style="font-size:10px;color:var(--muted)">target ${p.target?p.target.toFixed(2):'—'}</div>
+      </div>`;}).join('')}
+  </div>`;
+
   html+=`<div class="card"><h2 style="font-size:16px">Nilai per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.nilai,target:p.target})))}</div>`;
 
   puRows.forEach(p=>{
@@ -1279,9 +1291,63 @@ async function updateFindingStatus(id,status){
       body:JSON.stringify({secret:SYNC_SECRET,type:'updateStatus',findingId:id,status})});
     const out=await res.json();
     if(out.ok){
-      // update lokal cache biar langsung keliatan
       (_dashCloudData||[]).forEach(t=>{if((t['ID Temuan']||t['id'])===id)t['Status']=status;});
       toast('Status → '+status);renderDashboard();
+    }else toast('Gagal: '+(out.error||'unknown'));
+  }catch(e){toast('Gagal simpan (sinyal?): '+e.message);}
+}
+function _cloudFindingById(id){
+  return (_dashCloudData||[]).find(t=>(t['ID Temuan']||t['id'])===id);
+}
+function openCloudFinding(id){
+  const t=_cloudFindingById(id);if(!t)return;
+  const katOpts=['Ringkas','Rapi','Resik','Rawat','Rajin'].map(k=>`<option ${k===(t['Kategori']||'')?'selected':''}>${k}</option>`).join('');
+  const folderUrl=t['Folder Foto']||'';
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Detail Temuan (Cloud)</h3>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${esc(t['PU']||'')} — ${esc(t['Lokasi']||'')} · ${esc(t['Periode']||'')} · ${esc(t['Asesor']||'')}</div>
+    <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
+    <label class="field"><span class="lbl">Area Check</span><input class="input" id="cf-area" value="${esc(t['Area']||'')}"></label>
+    <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="cf-kat">${katOpts}</select></label>
+    <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="cf-desk" style="min-height:60px">${esc(t['Deskripsi']||'')}</textarea></label>
+    ${folderUrl?`<a href="${esc(folderUrl)}" target="_blank" class="btn btn-ghost btn-block btn-sm" style="margin-bottom:10px">📷 Lihat Foto di Drive</a>`:'<p class="hint">Tidak ada folder foto.</p>'}
+    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · PERBAIKAN</div>
+    <label class="field"><span class="lbl">Saran Perbaikan</span><textarea class="input" id="cf-saran" style="min-height:50px">${esc(t['Saran']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Target Perbaikan</span><input class="input" id="cf-target" value="${esc(t['Target']||'')}"></label>
+    <label class="field"><span class="lbl">Deskripsi Perbaikan</span><textarea class="input" id="cf-deskp" style="min-height:50px">${esc(t['Deskripsi Perbaikan']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Perbaikan</span><input class="input" id="cf-tglp" type="date" value="${esc((t['Tgl Perbaikan']||'').slice(0,10))}"></label>
+    <div style="font-size:11px;font-weight:800;color:var(--green-400);letter-spacing:.05em;margin:14px 0 8px">C · VERIFIKASI</div>
+    <label class="field"><span class="lbl">Status</span><select class="input" id="cf-status">
+      <option ${t['Status']==='Open'?'selected':''}>Open</option><option ${t['Status']==='Close'?'selected':''}>Close</option></select></label>
+    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="cf-verif" value="${esc(t['Verifikator']||'')}"></label>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batal</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveCloudFinding('${esc(id)}')">Simpan ke Google</button>
+    </div>
+  </div></div>`;
+}
+async function saveCloudFinding(id){
+  if(getAuth().role!=='admin'){toast('Hanya admin');return;}
+  const payload={
+    secret:SYNC_SECRET,type:'updateFinding',findingId:id,
+    fields:{
+      Area:$('#cf-area').value, Kategori:$('#cf-kat').value,
+      Deskripsi:$('#cf-desk').value, Saran:$('#cf-saran').value,
+      Target:$('#cf-target').value, 'Deskripsi Perbaikan':$('#cf-deskp').value,
+      'Tgl Perbaikan':$('#cf-tglp').value, Status:$('#cf-status').value,
+      Verifikator:$('#cf-verif').value
+    }
+  };
+  toast('Menyimpan ke Google…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify(payload)});
+    const out=await res.json();
+    if(out.ok){
+      // update cache lokal
+      const t=_cloudFindingById(id);
+      if(t)Object.keys(payload.fields).forEach(k=>{t[k]=payload.fields[k];});
+      closeModal();toast('Temuan tersimpan ✓');renderDashboard();
     }else toast('Gagal: '+(out.error||'unknown'));
   }catch(e){toast('Gagal simpan (sinyal?): '+e.message);}
 }
@@ -1353,12 +1419,17 @@ function renderDashboard(){
       ${dashTable(byAsesor,['Assessor','Temuan','Open','Close','% Close'])}</div>
 
     ${DASH_SRC==='cloud'&&auth.role==='admin'?`<div class="card"><h2>Kelola Status Temuan</h2>
-      <p class="hint">Hanya admin yang dapat mengubah status (satu pintu). Perubahan tersimpan ke Google.</p>
-      ${F.map(x=>`<div class="list-row">
-        <div class="nm" style="flex:1">${esc(x.pu)} — ${esc(x.loc)} · ${esc(x.kategori)}
-          <div style="font-size:11px;color:var(--muted);font-weight:400">${esc((x.deskripsi||'').slice(0,80))}</div></div>
-        <button class="btn btn-sm ${x.status==='Close'?'btn-ghost':'btn-primary'}" onclick="updateFindingStatus('${esc(x.id)}','${x.status==='Open'?'Close':'Open'}')">${x.status==='Open'?'Tandai Close':'Buka lagi'}</button>
-      </div>`).join('')}
+      <p class="hint">Tap temuan untuk lihat & edit detail. Hanya admin (satu pintu). Perubahan tersimpan ke Google.</p>
+      ${F.map(x=>{const stc=x.status==='Close'?'var(--green-400)':'var(--red)';
+        return `<div class="card" style="padding:13px;margin-bottom:8px;cursor:pointer" onclick="openCloudFinding('${esc(x.id)}')">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <span class="tag5r t-${x.kategori}">${(x.kategori||'').toUpperCase()}</span>
+          <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(x.status)}</span>
+        </div>
+        <div style="font-weight:700;font-size:13px">${esc(x.pu)} — ${esc(x.loc)}</div>
+        <div style="font-size:12px;color:var(--muted)">${esc((x.deskripsi||'').slice(0,90))}${(x.deskripsi||'').length>90?'…':''}</div>
+        <div style="font-size:11px;color:var(--green);margin-top:4px;font-weight:700">Tap untuk detail ›</div>
+      </div>`;}).join('')}
     </div>`:''}
 
     <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">⬇ Unduh Rekap (CSV)</button>${DASH_SRC==='cloud'?'<button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="loadDashCloud()">↻ Refresh dari Google</button>':''}</div>
