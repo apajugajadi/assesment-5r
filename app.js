@@ -805,7 +805,15 @@ function admArea(){
       return `<div class="list-row"><div class="nm">${esc(a.name)}<div style="font-size:12px;color:var(--muted);font-weight:400">${nItems} kriteria</div></div>
         <button class="btn btn-ghost btn-sm" onclick="editArea('${a.id}')">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="delArea('${a.id}')">Hapus</button></div>`;
-    }).join('')}`;
+    }).join('')}
+    ${syncConfigBtn()}`;
+}
+function syncConfigBtn(){
+  if(!SYNC_URL)return '';
+  return `<div class="card" style="background:#F4F8F5">
+    <p class="hint" style="margin-bottom:8px">Setelah ubah form/area/target, sebarkan ke semua asesor. Versi form saat ini: <b>v${STORE.config.version||1}</b>.</p>
+    <button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Form ke Semua Asesor</button>
+  </div>`;
 }
 function editArea(id){
   const area=id?STORE.config.areaChecks.find(a=>a.id===id):{id:'new'+Date.now(),name:'',aspects:{Ringkas:[''],Rapi:[''],Resik:[''],Rawat:['']}};
@@ -868,7 +876,8 @@ function admMatrix(){
           <input type="checkbox" ${on?'checked':''} style="width:20px;height:20px" onchange="toggleArea('${pu}','${esc(loc)}','${a.id}',this.checked)">
           ${esc(a.name)}</label>`;
       }).join('')}
-    </div>`).join('')}`;
+    </div>`).join('')}
+    ${syncConfigBtn()}`;
 }
 function toggleArea(pu,loc,areaId,on){
   const a=STORE.config.areaChecks.find(x=>x.id===areaId);if(!a)return;
@@ -1283,7 +1292,7 @@ function allFindings(){
       deskPerbaikan:t['Deskripsi Perbaikan']||'', tglPerbaikan:t['Tgl Perbaikan']||'',
       status:t['Status']||'Open', verifikator:t['Verifikator']||'',
       pu:t['PU']||'', loc:t['Lokasi']||'', periode:t['Periode']||'', asesor:t['Asesor']||'',
-      sessionId:t['ID Sesi']||''
+      sessionId:t['ID Sesi']||'', 'Folder Foto':t['Folder Foto']||''
     }));
   }
   const out=[];
@@ -1450,8 +1459,12 @@ function renderDashboard(){
           <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(x.status)}</span>
         </div>
         <div style="font-weight:700;font-size:13px">${esc(x.pu)} — ${esc(x.loc)}</div>
+        <div style="font-size:12px;color:var(--ink);font-weight:600">${esc(x.area||'')}</div>
         <div style="font-size:12px;color:var(--muted)">${esc((x.deskripsi||'').slice(0,90))}${(x.deskripsi||'').length>90?'…':''}</div>
-        <div style="font-size:11px;color:var(--green);margin-top:4px;font-weight:700">Tap untuk detail ›</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+          <span style="font-size:11px;color:var(--green);font-weight:700">Tap untuk detail ›</span>
+          ${x['Folder Foto']?'<span style="font-size:11px;color:var(--amber);font-weight:700">📷 ada foto</span>':''}
+        </div>
       </div>`;}).join('')}
     </div>`:''}
 
