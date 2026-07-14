@@ -1,4 +1,6 @@
-/* ===== Assesment 5R — app logic (vanilla JS, offline-first, localStorage) ===== */
+/* ===== Assesment 5R — app logic (vanilla JS, offline-first, localStorage) =====
+   + UPDATE: Multi-Tahun & Jenis (Resmi/Internal) + filter & tren di Dashboard Nilai
+   Perubahan ditandai komentar  // [MT]  (Multi-Tahun) */
 'use strict';
 
 const LS_KEY='asesmen5r_v1';
@@ -14,6 +16,13 @@ const ASESOR_PASS='asesor';
 const SYNC_URL='https://script.google.com/macros/s/AKfycbxGrxZH9wi05uOgvdR7ckQ0qqKV9SkyREAyftq83ISEtoQ8O4Pp_5NYI6WnzN_tXCZRXg/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
+/* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
+function tahunOptions(sel){
+  var y=new Date().getFullYear(), o='';
+  for(var t=2024;t<=y+1;t++){o+='<option '+(String(t)===String(sel)?'selected':(t===y&&sel==null?'selected':''))+'>'+t+'</option>';}
+  return o;
+}
+
 /* ---------- Store ---------- */
 function loadStore(){
   const SEED_VER=SEED_DATA.version||1;
@@ -26,7 +35,7 @@ function loadStore(){
         st.config=JSON.parse(JSON.stringify(SEED_DATA));
         st.sessions=st.sessions||[];
         try{localStorage.setItem(LS_KEY,JSON.stringify(st));}catch(e){}
-        setTimeout(()=>toast('Klausul diperbarui ke versi terbaru'),400);
+        setTimeout(()=>toast('Klausul telah diperbarui ke versi terbaru'),400);
       }
       return st;
     }
@@ -38,7 +47,7 @@ function loadStore(){
   };
   return s;
 }
-function saveStore(){try{localStorage.setItem(LS_KEY,JSON.stringify(STORE));}catch(e){toast('Gagal simpan: storage penuh?');}}
+function saveStore(){try{localStorage.setItem(LS_KEY,JSON.stringify(STORE));}catch(e){toast('Gagal menyimpan: kemungkinan penyimpanan penuh');}}
 let STORE=loadStore();
 
 /* ---------- Auth ---------- */
@@ -113,7 +122,7 @@ function draftProgress(draft){
 
 /* ---------- Photo handling (kompres agresif biar hemat storage) ---------- */
 function handlePhoto(file,cb){
-  if(!storageOK()){toast('⚠ Penyimpanan hampir penuh — backup & hapus data lama dulu');return;}
+  if(!storageOK()){toast('Penyimpanan hampir penuh — mohon lakukan pencadangan dan hapus data lama terlebih dahulu');return;}
   const reader=new FileReader();
   reader.onload=e=>{
     const img=new Image();
@@ -187,11 +196,11 @@ function renderLogin(){
     <div id="login-err"></div>
     ${loginRole==='asesor'?`
       <label class="field"><span class="lbl">Nama Asesor</span>
-        <input class="input" id="li-name" placeholder="Nama lengkap" autocomplete="name"></label>
-      <label class="field"><span class="lbl">Kata sandi asesor</span>
+        <input class="input" id="li-name" placeholder="Nama Lengkap" autocomplete="name"></label>
+      <label class="field"><span class="lbl">Kata Sandi Asesor</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••" inputmode="text"></label>
     `:`
-      <label class="field"><span class="lbl">Kata sandi admin</span>
+      <label class="field"><span class="lbl">Kata Sandi Administrator</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••"></label>
     `}
     <button class="btn btn-amber btn-block" style="margin-top:6px" onclick="doLogin()">Masuk</button>
@@ -205,12 +214,12 @@ function doLogin(){
   const pass=($('#li-pass')||{}).value||'';
   const err=$('#login-err');
   if(loginRole==='admin'){
-    if(pass!==ADMIN_PASS){err.innerHTML='<div class="login-err">Kata sandi admin salah.</div>';return;}
+    if(pass!==ADMIN_PASS){err.innerHTML='<div class="login-err">Kata Sandi Administrator salah.</div>';return;}
     setAuth({role:'admin',name:'Admin'});VIEW='home';render();
   }else{
     const name=($('#li-name')||{}).value.trim();
-    if(!name){err.innerHTML='<div class="login-err">Isi nama asesor dulu.</div>';return;}
-    if(pass!==ASESOR_PASS){err.innerHTML='<div class="login-err">Kata sandi asesor salah.</div>';return;}
+    if(!name){err.innerHTML='<div class="login-err">Nama asesor wajib diisi.</div>';return;}
+    if(pass!==ASESOR_PASS){err.innerHTML='<div class="login-err">Kata Sandi Asesor salah.</div>';return;}
     setAuth({role:'asesor',name});VIEW='home';render();
   }
 }
@@ -241,8 +250,8 @@ function openDrawer(){
       <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>`:''}
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
-      ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Draft</button>`:''}
-      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Form & Item Audit</button>`:''}
+      ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
+      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulirulir & Butir Audit</button>`:''}
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
     </div>
     <div class="drawer-foot">Assesment 5R · Direktorat Operasi</div>
@@ -270,23 +279,32 @@ function renderHome(){
   const locs=Object.keys(STORE.config.matrix[homePU]||{});
   const dft=loadDraft();
   const resumeHtml=dft?`<div class="card" style="border:2px solid var(--amber);background:#FFF8EA">
-      <div style="font-weight:800;font-family:Archivo;margin-bottom:4px">📝 Lanjutkan assessment?</div>
-      <p class="hint" style="margin-bottom:12px">Ada isian belum selesai: <b>${esc(dft.pu)} — ${esc(dft.loc)}</b> (${draftProgress(dft).pct}% terisi).</p>
+      <div style="font-weight:800;font-family:Archivo;margin-bottom:4px">Lanjutkan Penilaian yang Belum Selesai?</div>
+      <p class="hint" style="margin-bottom:12px">Terdapat penilaian yang belum selesai: <b>${esc(dft.pu)} — ${esc(dft.loc)}</b> (${draftProgress(dft).pct}% terisi).</p>
       <div style="display:flex;gap:10px">
         <button class="btn btn-amber" style="flex:1" onclick="resumeDraft()">Lanjutkan</button>
-        <button class="btn btn-ghost btn-sm" onclick="discardDraft()">Buang</button>
+        <button class="btn btn-ghost btn-sm" onclick="discardDraft()">Batalkan</button>
       </div></div>`:'';
-  app().innerHTML=topbar('Assesment 5R','Hai, '+auth.name)+`
+  app().innerHTML=topbar('Assesment 5R','Selamat datang, '+auth.name)+`
   <div class="wrap">
     ${resumeHtml}
     <div class="card">
-      <h2>Mulai Assesment</h2>
-      <p class="hint">Pilih periode, production unit, dan lokasi yang mau dinilai.</p>
+      <h2>Mulai Penilaian</h2>
+      <p class="hint">Pilih periode, tahun, jenis penilaian, Production Unit, dan lokasi yang akan dinilai.</p>
       <label class="field"><span class="lbl">Periode</span>
         <select class="input" id="h-periode">
           <option value="Mid Year">Mid Year ${new Date().getFullYear()}</option>
           <option value="End Year">End Year ${new Date().getFullYear()}</option>
         </select></label>
+      <div style="display:flex;gap:10px">
+        <label class="field" style="flex:1"><span class="lbl">Tahun</span>
+          <select class="input" id="h-tahun">${tahunOptions()}</select></label>
+        <label class="field" style="flex:1"><span class="lbl">Jenis</span>
+          <select class="input" id="h-jenis">
+            <option value="Resmi">Resmi</option>
+            <option value="Internal">Internal</option>
+          </select></label>
+      </div>
       <label class="field"><span class="lbl">Production Unit</span>
         <select class="input" id="h-pu" onchange="homePU=this.value;renderHome()">
           ${pus.map(p=>`<option ${p===homePU?'selected':''}>${esc(p)}</option>`).join('')}
@@ -299,21 +317,21 @@ function renderHome(){
     </div>
 
     ${STORE.sessions.length?`<div class="card">
-      <h2>Riwayat Tersimpan</h2>
-      <p class="hint">${STORE.sessions.length} assessment di perangkat ini.</p>
+      <h2>Riwayat Penilaian Tersimpan</h2>
+      <p class="hint">${STORE.sessions.length} penilaian tersimpan pada perangkat ini.</p>
       ${STORE.sessions.slice().reverse().slice(0,8).map(s=>{
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
           <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
-          <div class="st">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
+          <div class="st">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(s.jenis):''} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <span class="chev">›</span></div>`;
       }).join('')}
-      <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">🗑 Hapus Data di Perangkat Ini</button>
+      <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">Hapus Data pada Perangkat Ini</button>
     </div>`:''}
 
-    ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Form & Item Audit</button>`:''}
-    <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">📊 Dashboard Analisis Temuan</button>
+    ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Formulirulir & Butir Audit</button>`:''}
+    <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">Dashboard Analisis Temuan</button>
   </div>`;
 }
 
@@ -323,27 +341,29 @@ function clearMyData(){
     if(!confirm(`⚠️ PERINGATAN: ada ${unsynced} assessment yang BELUM terkirim ke Google.\n\nKalau dihapus sekarang, data itu HILANG PERMANEN dan tidak bisa dikembalikan.\n\nDisarankan kirim dulu (☁) sebelum hapus. Tetap hapus?`))return;
     if(!confirm(`Yakin? ${unsynced} data yang belum terkirim akan benar-benar hilang.`))return;
   }else{
-    if(!confirm('Hapus semua data assessment di perangkat ini? Semua sudah terkirim ke Google, jadi aman.'))return;
+    if(!confirm('Hapus seluruh data penilaian pada perangkat ini? Seluruh data telah tersinkron ke Google sehingga aman untuk dihapus.'))return;
   }
   STORE.sessions=[];
   clearDraft();
   saveStore();
-  toast('Data di perangkat ini dihapus');
+  toast('Data pada perangkat ini telah dihapus');
   renderHome();
 }
 
 function startAssess(){
   const pu=$('#h-pu').value, loc=$('#h-loc').value, periode=$('#h-periode').value;
-  // ANTI-DOUBLE: 1 PU+Lokasi+Periode cuma boleh sekali (cek data di HP ini)
-  const dup=STORE.sessions.find(s=>s.pu===pu&&s.loc===loc&&(s.periode||'')===(periode||''));
+  const tahun=parseInt(($('#h-tahun')||{}).value,10)||new Date().getFullYear();  // [MT]
+  const jenis=($('#h-jenis')||{}).value||'Resmi';                                // [MT]
+  // ANTI-DOUBLE: 1 PU+Lokasi+Periode+Tahun+Jenis cuma boleh sekali (cek data di HP ini) [MT]
+  const dup=STORE.sessions.find(s=>s.pu===pu&&s.loc===loc&&(s.periode||'')===(periode||'')&&(s.tahun||'')===tahun&&(s.jenis||'Resmi')===jenis);
   if(dup){
-    toast(`⛔ ${loc} (${pu}) periode ${periode} sudah dinilai. Tidak boleh dobel.`);
+    toast(`⛔ ${loc} (${pu}) ${periode} ${tahun} [${jenis}] sudah dinilai. Tidak boleh dobel.`);
     return;
   }
   const areas=(STORE.config.matrix[pu]||{})[loc]||[];
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
-  DRAFT={id:'s'+Date.now(),pu,loc,periode,asesor:getAuth().name,date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
+  DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
     areas:areaIds,answers:{},interviewVals:{},photos:{},notes:{},curArea:0};
   VIEW='assess';render();
 }
@@ -351,8 +371,8 @@ function openSession(id){
   const s=STORE.sessions.find(x=>x.id===id);if(!s)return;
   DRAFT=JSON.parse(JSON.stringify(s));VIEW='report';render();
 }
-function resumeDraft(){const d=loadDraft();if(!d){toast('Draft tidak ada');renderHome();return;}DRAFT=d;VIEW='assess';render();}
-function discardDraft(){if(!confirm('Buang isian yang belum selesai? Tidak bisa dikembalikan.'))return;clearDraft();renderHome();toast('Draft dibuang');}
+function resumeDraft(){const d=loadDraft();if(!d){toast('Konsep penilaian tidak ditemukan');renderHome();return;}DRAFT=d;VIEW='assess';render();}
+function discardDraft(){if(!confirm('Batalkan isian yang belum selesai? Tidak bisa dikembalikan.'))return;clearDraft();renderHome();toast('Konsep penilaian telah dibatalkan');}
 
 /* ---------- ASSESS ---------- */
 function renderAssess(){
@@ -381,7 +401,7 @@ function renderAssess(){
    </div>`;
   renderAssessBody();
 }
-/* nilai total berjalan (rata2 semua aspek+interview yg sudah terisi) */
+/* nilai total berjalan (rata-rata seluruh aspek dan interview yang sudah terisi) */
 function liveScore(d){
   let sum=0,n=0;
   d.areas.forEach(areaId=>{
@@ -401,8 +421,8 @@ function renderAssessBody(){
   const d=DRAFT, step=d.curArea, body=$('#assess-body');
   // step 0 = interview (di AWAL)
   if(step===0){
-    body.innerHTML=`<div class="card"><h2>Wawancara Operator & Supervisor</h2>
-      <p class="hint">Dilakukan di awal. Nilai langsung 1 (terburuk) sampai 5 (terbaik) sesuai kondisi.</p></div>`
+    body.innerHTML=`<div class="card"><h2>Wawancara Operator dan Supervisor</h2>
+      <p class="hint">Dilaksanakan pada tahap awal. Berikan nilai 1 (paling rendah) sampai 5 (paling baik) sesuai kondisi sebenarnya.</p></div>`
       + STORE.config.interview.map((it,idx)=>{
         const val=d.interviewVals[idx]||0;
         const desc=val?it.rubrik[val-1]:'';
@@ -412,9 +432,9 @@ function renderAssessBody(){
           <div class="scale-desc" id="idesc-${idx}">${esc(desc)}</div>
         </div>`;
       }).join('')
-      + (d.areas.length===0?`<div class="card"><h2>Belum ada area</h2>
+      + (d.areas.length===0?`<div class="card"><h2>Belum Terdapat Area Penilaian</h2>
       <p class="hint">Tambahkan area yang akan dinilai di lapangan.</p>
-      <button class="btn btn-primary btn-block" onclick="showAddArea()">+ Tambah Area Check</button></div>`:'');
+      <button class="btn btn-primary btn-block" onclick="showAddArea()">+ Tambah Area Pemeriksaan</button></div>`:'');
     return;
   }
   const areaIdx=step-1; // area dimulai step 1
@@ -425,8 +445,8 @@ function renderAssessBody(){
     <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">AREA ${areaIdx+1} DARI ${d.areas.length}</div>
     <h2 style="color:#fff;margin-top:4px">${esc(area.name)}</h2>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="removeAreaFromSession('${areaId}')">✕ Tidak ada di lapangan</button>
-      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="showAddArea()">+ Tambah area lain</button>
+      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="removeAreaFromSession('${areaId}')">✕ Tidak Ditemukan di Lapangan</button>
+      <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="showAddArea()">+ Tambah Area Lain</button>
     </div>
     </div>`;
   ASPECTS.forEach(asp=>{
@@ -448,7 +468,7 @@ function renderAssessBody(){
     const akey=`${areaId}|${asp}`;
     const photos=d.photos[akey]||[];
     html+=`<div class="finding">
-      <div class="finding-lbl">Temuan & foto — ${asp} <span style="color:var(--muted);font-weight:400">(${photos.length}/5)</span></div>
+      <div class="finding-lbl">Temuan dan Dokumentasi Foto — ${asp} <span style="color:var(--muted);font-weight:400">(${photos.length}/5)</span></div>
       <div class="photo-row">
         ${photos.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
         ${photos.length<5?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
@@ -460,14 +480,14 @@ function renderAssessBody(){
   body.innerHTML=html;
 }
 function isLocked(){return !!(DRAFT&&DRAFT.locked);}
-function lockBlock(){toast('🔒 Sesi terkunci (sudah dikirim ke Google). Edit dinonaktifkan.');}
+function lockBlock(){toast('Sesi telah terkunci karena sudah dikirim ke Google. Perubahan tidak dapat dilakukan.');}
 function unlockSession(){
-  const auth=getAuth();if(!auth||auth.role!=='admin'){toast('Hanya admin yang bisa buka kunci');return;}
-  if(!confirm('Buka kunci sesi ini untuk koreksi? Setelah diedit, WAJIB sync ulang ke Google agar data konsisten.'))return;
+  const auth=getAuth();if(!auth||auth.role!=='admin'){toast('Hanya administrator yang dapat membuka kunci sesi');return;}
+  if(!confirm('Buka kunci sesi ini untuk melakukan koreksi? Setelah diperbarui, sesi WAJIB disinkronkan ulang ke Google agar data tetap konsisten.'))return;
   DRAFT.locked=false;
   const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
   if(i>=0)STORE.sessions[i].locked=false;
-  saveStore();render();toast('Kunci dibuka — jangan lupa sync ulang setelah edit');
+  saveStore();render();toast('Kunci telah dibuka — mohon lakukan sinkronisasi ulang setelah pembaruan selesai');
 }
 function setAns(key,val){if(isLocked())return lockBlock();DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
 function setInterview(idx,n){if(isLocked())return lockBlock();DRAFT.interviewVals[idx]=DRAFT.interviewVals[idx]===n?0:n;saveDraftLite();renderAssessBody();updateSpine();}
@@ -480,7 +500,7 @@ function navArea(dir){DRAFT.curArea=Math.max(0,Math.min(DRAFT.areas.length,DRAFT
 function removeAreaFromSession(areaId){
   if(isLocked())return lockBlock();
   const area=STORE.config.areaChecks.find(a=>a.id===areaId);
-  if(!confirm(`Hapus area "${area?area.name:''}" dari assessment ini? (tidak menghapus master form)`))return;
+  if(!confirm(`Hapus area "${area?area.name:''}" dari penilaian ini? (tidak menghapus data induk formulir)`))return;
   // clear answers/photos/notes for this area
   Object.keys(DRAFT.answers).forEach(k=>{if(k.startsWith(areaId+'|'))delete DRAFT.answers[k];});
   Object.keys(DRAFT.photos).forEach(k=>{if(k.startsWith(areaId+'|')||k===areaId)delete DRAFT.photos[k];});
@@ -488,14 +508,14 @@ function removeAreaFromSession(areaId){
   DRAFT.areas=DRAFT.areas.filter(id=>id!==areaId);
   // step area = index+1; clamp ke step terakhir yang valid (areas.length)
   if(DRAFT.curArea>DRAFT.areas.length)DRAFT.curArea=Math.max(0,DRAFT.areas.length);
-  saveDraftLite();renderAssess();toast('Area dihapus dari sesi ini');
+  saveDraftLite();renderAssess();toast('Area telah dihapus dari sesi ini');
 }
 function showAddArea(){
   const avail=STORE.config.areaChecks.filter(a=>!DRAFT.areas.includes(a.id));
-  if(!avail.length){toast('Semua area sudah masuk');return;}
+  if(!avail.length){toast('Seluruh area telah ditambahkan');return;}
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <h3>Tambah Area ke Assessment</h3>
-    <p class="hint">Pilih area yang ditemukan di lapangan.</p>
+    <h3>Tambah Area ke Penilaian</h3>
+    <p class="hint">Pilih area yang ditemukan pada saat pemeriksaan lapangan.</p>
     ${avail.map(a=>`<div class="list-row"><div class="nm">${esc(a.name)}</div>
       <button class="btn btn-primary btn-sm" onclick="addAreaToSession('${a.id}')">+ Tambah</button></div>`).join('')}
     <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="closeModal()">Tutup</button>
@@ -505,9 +525,9 @@ function addAreaToSession(areaId){
   if(isLocked())return lockBlock();
   if(!DRAFT.areas.includes(areaId))DRAFT.areas.push(areaId);
   DRAFT.curArea=DRAFT.areas.length; // step = area index(N-1)+1 = N, jump ke area baru
-  saveDraftLite();closeModal();renderAssess();toast('Area ditambahkan');
+  saveDraftLite();closeModal();renderAssess();toast('Area telah ditambahkan');
 }
-function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto per aspek');return;}handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
 function rmPhoto(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
 /* ---------- Auto-save draft ---------- */
@@ -520,7 +540,7 @@ function saveDraftLite(){
     flashSaved();
   }catch(e){
     // storage penuh
-    toast('⚠ Penyimpanan penuh — kurangi foto / backup dulu');
+    toast('Penyimpanan penuh — mohon kurangi jumlah foto atau lakukan pencadangan terlebih dahulu');
   }
 }
 function flashSaved(){
@@ -566,7 +586,7 @@ function generateFindings(draft){
 function finishAssess(){
   const rep=computeReport(DRAFT);
   DRAFT.avg=rep.avg;DRAFT.finishedAt=new Date().toISOString();
-  // generate findings only if belum ada (biar edit manual gak ketimpa)
+  // hasilkan temuan hanya jika belum ada (agar perubahan manual tidak tertimpa)
   if(!DRAFT.findings)DRAFT.findings=generateFindings(DRAFT);
   // upsert into sessions
   const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
@@ -598,20 +618,25 @@ function buildSyncPayload(rec){
       });
     });
   });
+  // [MT] pastikan tahun & jenis ikut terkirim ke Code.gs (kolom Tahun/Jenis)
+  const recOut=Object.assign({},rec,{
+    tahun:(rec.tahun!=null&&rec.tahun!==''?rec.tahun:new Date().getFullYear()),
+    jenis:(rec.jenis||'Resmi')
+  });
   return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
-    predikat:rep.grade.label,record:rec,detail,
+    predikat:rep.grade.label,record:recOut,detail,
     findings:(rec.findings||[]).map(f=>({
       id:f.id,area:f.area,kategori:f.kategori,skor:f.skor||'',
-      deskripsi:f.deskripsi||'',saran:f.saran||'',target:f.target||'',
+      deskripsi:f.deskripsi||'',penyebab:f.penyebab||'',saran:f.saran||'',target:f.target||'',
       deskPerbaikan:f.deskPerbaikan||'',tglPerbaikan:f.tglPerbaikan||'',
       status:f.status||'Open',verifikator:f.verifikator||''
     }))};
 }
 async function syncSession(id){
-  if(!SYNC_URL){alert('SYNC_URL belum diisi (lihat panduan Fase 2).');return;}
+  if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   const rec=STORE.sessions.find(s=>s.id===id);
   if(!rec){alert('Sesi tidak ditemukan.');return;}
-  toast('Mengirim ke Google…');
+  toast('Sedang mengirim data ke Google…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
@@ -620,18 +645,18 @@ async function syncSession(id){
     if(out.ok){
       rec.synced=true;rec.syncedAt=new Date().toISOString();rec.locked=true;
       rec.syncCount=out.syncCount||((rec.syncCount||0)+1);saveStore();
-      alert('✓ BERHASIL TERKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nFoto terkirim: '+(out.photos||0)+'\n\nSesi ini sekarang terkunci (read-only).');
+      alert('BERHASIL DIKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nJumlah foto terkirim: '+(out.photos||0)+'\n\nSesi ini kini terkunci dan hanya dapat dibaca.');
       if(VIEW==='admin')renderAdmin();
       if(VIEW==='report')render();
-    }else alert('✗ GAGAL mengirim.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('✗ GAGAL mengirim (cek sinyal/koneksi).\n\nDetail: '+e.message);}
+    }else alert('GAGAL mengirim data.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message);}
 }
 async function syncAllUnsynced(){
-  if(!SYNC_URL){alert('SYNC_URL belum diisi.');return;}
+  if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   const pending=STORE.sessions.filter(s=>!s.synced);
-  if(!pending.length){alert('Semua data sudah ter-sync ke Google.');return;}
-  if(!confirm('Kirim '+pending.length+' assessment yang belum ter-sync ke Google?'))return;
-  toast(`Mengirim ${pending.length} sesi…`);
+  if(!pending.length){alert('Seluruh data telah tersinkron ke Google.');return;}
+  if(!confirm('Kirim '+pending.length+' penilaian yang belum tersinkron ke Google?'))return;
+  toast(`Sedang mengirim ${pending.length} sesi…`);
   let ok=0,gagal=0;
   for(const s of pending){
     try{
@@ -644,7 +669,7 @@ async function syncAllUnsynced(){
     }catch(e){gagal++;}
   }
   saveStore();renderAdmin();
-  alert('SELESAI MENGIRIM\n\nBerhasil: '+ok+'\nGagal: '+gagal+(gagal?'\n\nYang gagal bisa dicoba lagi nanti.':''));
+  alert('PENGIRIMAN SELESAI\n\nBerhasil: '+ok+'\nGagal: '+gagal+(gagal?'\n\nData yang gagal terkirim dapat dicoba kembali.':''));
 }
 
 /* ---------- REPORT ---------- */
@@ -654,16 +679,16 @@ function renderReport(){
   const lockBanner=d.locked?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0;display:flex;align-items:center;gap:12px">
     <span style="font-size:22px">🔒</span>
     <div style="flex:1"><div style="font-weight:800;font-size:14px">Sesi Terkunci</div>
-    <div style="font-size:12px;color:var(--muted)">Sudah dikirim ke Google${d.syncCount?` (${d.syncCount}×)`:''}${d.syncedAt?' · '+new Date(d.syncedAt).toLocaleString('id-ID'):''}. Edit dinonaktifkan.</div></div>
+    <div style="font-size:12px;color:var(--muted)">Telah dikirim ke Google${d.syncCount?` (${d.syncCount}×)`:''}${d.syncedAt?' · '+new Date(d.syncedAt).toLocaleString('id-ID'):''}. Perubahan dinonaktifkan.</div></div>
     ${isAdmin?`<button class="btn btn-sm btn-amber" onclick="unlockSession()">Buka Kunci</button>`:''}
   </div>`:'';
-  app().innerHTML=topbar('Hasil Assesment',d.pu+' · '+d.loc)+`
+  app().innerHTML=topbar('Hasil Penilaian',d.pu+' · '+d.loc)+`
   <div class="wrap">
     ${lockBanner}
     <div class="predikat-hero" style="background:linear-gradient(135deg,${g.color},${shade(g.color,-18)})">
       <div class="score">${rep.avg?rep.avg.toFixed(2):'—'}</div>
       <div class="lbl">${esc(g.label)}</div>
-      <div class="sub">${esc(d.periode||"")} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
+      <div class="sub">${esc(d.periode||"")}${d.tahun?' '+esc(d.tahun):''}${d.jenis?' · '+esc(d.jenis):''} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
     </div>
     <div class="radar-wrap">
       <div style="font-weight:800;font-family:Archivo;margin-bottom:10px">Profil 5R</div>
@@ -671,7 +696,7 @@ function renderReport(){
     </div>
     <div class="card">
       <h2>Rincian Nilai</h2>
-      <p class="hint">Ketuk baris untuk lihat klausul mana yang menentukan nilai.</p>
+      <p class="hint">Ketuk salah satu baris untuk melihat klausul yang menentukan nilai tersebut.</p>
       <table class="rep"><thead><tr><th>Area</th><th>Aspek</th><th class="num">Nilai</th></tr></thead><tbody>
       ${rep.rows.map((r,ri)=>{
         const expandable=!r.interview&&r.detail&&r.detail.length;
@@ -695,15 +720,15 @@ function renderReport(){
     ${reportNotes(d)}
     ${findingsCard(d)}
     <div class="card">
-      <h2>Ekspor</h2>
-      <p class="hint">Simpan hasil untuk laporan atau arsip.</p>
-      ${SYNC_URL?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="syncSession('${d.id}')">☁ Kirim ke Google</button>`:''}
-      <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">⬇ Unduh CSV (Excel)</button>
-      <button class="btn btn-ghost btn-block" onclick="window.print()">🖨 Cetak / Simpan PDF</button>
+      <h2>Ekspor Data</h2>
+      <p class="hint">Simpan hasil penilaian untuk keperluan laporan atau kearsipan.</p>
+      ${SYNC_URL?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="syncSession('${d.id}')">Kirim ke Google</button>`:''}
+      <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">Unduh sebagai CSV (Excel)</button>
+      <button class="btn btn-ghost btn-block" onclick="window.print()">Cetak atau Simpan sebagai PDF</button>
     </div>
   </div>
   <div class="botbar">
-    <button class="btn btn-ghost" onclick="VIEW='assess';render()">‹ Edit</button>
+    <button class="btn btn-ghost" onclick="VIEW='assess';render()">‹ Ubah</button>
     <button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai</button>
   </div>`;
 }
@@ -726,7 +751,7 @@ function reportNotes(d){
     items.push({label,note,photos});
   });
   if(!items.length)return '';
-  return `<div class="card"><h2>Temuan & Foto</h2>
+  return `<div class="card"><h2>Temuan dan Dokumentasi Foto</h2>
     ${items.map(it=>`<div style="margin-bottom:14px">
       <div style="font-weight:700;font-size:14px;margin-bottom:4px">${esc(it.label)}</div>
       ${it.note?`<div style="font-size:13px;color:var(--muted);margin-bottom:6px">${esc(it.note)}</div>`:''}
@@ -764,7 +789,7 @@ function radarSVG(radar){
 }
 function exportCSV(){
   const d=DRAFT,rep=computeReport(d);
-  let rows=[['Periode',d.periode||''],['Production Unit',d.pu],['Lokasi',d.loc],['Asesor',d.asesor],['Tanggal',d.date],['Nilai Akhir',rep.avg?rep.avg.toFixed(2):''],['Predikat',rep.grade.label],[],['Area','Aspek','Nilai','Catatan']];
+  let rows=[['Periode',d.periode||''],['Tahun',d.tahun||''],['Jenis',d.jenis||'Resmi'],['Production Unit',d.pu],['Lokasi',d.loc],['Asesor',d.asesor],['Tanggal',d.date],['Nilai Akhir',rep.avg?rep.avg.toFixed(2):''],['Predikat',rep.grade.label],[],['Area','Aspek','Nilai','Catatan']];
   rep.rows.forEach(r=>rows.push([r.area,r.aspek+(r.interview?' (interview)':''),r.score,'']));
   rows.push([]);rows.push(['Rincian Klausul']);rows.push(['Area','Aspek','Klausul','Jawaban']);
   rep.rows.forEach(r=>{if(r.detail)r.detail.forEach(dt=>rows.push([r.area,r.aspek,dt.q,dt.v==='ya'?'Ya':dt.v==='tidak'?'Tidak':'belum dijawab']));});
@@ -774,19 +799,19 @@ function exportCSV(){
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download=`Assesment5R_${d.pu}_${d.loc}_${d.date}.csv`.replace(/[^\w.\-]/g,'_');a.click();
-  toast('CSV diunduh');
+  toast('Berkas CSV telah diunduh');
 }
 
 /* ---------- ADMIN CMS ---------- */
 function renderAdmin(){
-  app().innerHTML=topbar('Kelola Form','Mode admin')+`
+  app().innerHTML=topbar('Kelola Formulir','Mode Administrator')+`
   <div class="wrap">
     <div class="adm-tab">
-      <button class="${ADMIN_TAB==='area'?'on':''}" onclick="ADMIN_TAB='area';renderAdmin()">Area Check</button>
-      <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Form per Lokasi</button>
+      <button class="${ADMIN_TAB==='area'?'on':''}" onclick="ADMIN_TAB='area';renderAdmin()">Area Pemeriksaan</button>
+      <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Formulir per Lokasi</button>
       <button class="${ADMIN_TAB==='target'?'on':''}" onclick="ADMIN_TAB='target';renderAdmin()">Target Nilai</button>
       <button class="${ADMIN_TAB==='sessions'?'on':''}" onclick="ADMIN_TAB='sessions';renderAdmin()">Data Tersimpan</button>
-      <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Backup</button>
+      <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Pencadangan</button>
     </div>
     <div id="adm-body"></div>
   </div>
@@ -799,13 +824,13 @@ function renderAdmin(){
   else b.innerHTML=admData();
 }
 function admArea(){
-  return `<div class="card"><h2>Master Area Check</h2>
-    <p class="hint">${STORE.config.areaChecks.length} area. Klik untuk edit aspek & kriteria (Ya/Tidak).</p>
-    <button class="btn btn-amber btn-sm" onclick="editArea(null)">+ Tambah Area Check</button></div>
+  return `<div class="card"><h2>Master Area Pemeriksaan</h2>
+    <p class="hint">${STORE.config.areaChecks.length} area. Ketuk untuk mengubah aspek dan kriteria (Ya/Tidak).</p>
+    <button class="btn btn-amber btn-sm" onclick="editArea(null)">+ Tambah Area Pemeriksaan</button></div>
     ${STORE.config.areaChecks.map(a=>{
       const nItems=ASPECTS.reduce((s,asp)=>s+((a.aspects[asp]||[]).length),0);
       return `<div class="list-row"><div class="nm">${esc(a.name)}<div style="font-size:12px;color:var(--muted);font-weight:400">${nItems} kriteria</div></div>
-        <button class="btn btn-ghost btn-sm" onclick="editArea('${a.id}')">Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="editArea('${a.id}')">Ubah</button>
         <button class="btn btn-danger btn-sm" onclick="delArea('${a.id}')">Hapus</button></div>`;
     }).join('')}
     ${syncConfigBtn()}`;
@@ -814,26 +839,26 @@ function syncConfigBtn(){
   if(!SYNC_URL)return '';
   const dirty=STORE.config&&STORE.config._dirty;
   return `<div class="card" style="background:${dirty?'#FEF9EC':'#F4F8F5'};${dirty?'border-color:#F5DFA0':''}">
-    ${dirty?'<p class="hint" style="margin-bottom:8px;color:#9A6B00;font-weight:700">⚠️ Ada perubahan yang BELUM disinkronkan. Asesor belum dapat versi terbaru.</p>':`<p class="hint" style="margin-bottom:8px">Form sudah tersinkron. Versi saat ini: <b>v${STORE.config.version||1}</b>.</p>`}
-    <button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Form ke Semua Asesor</button>
+    ${dirty?'<p class="hint" style="margin-bottom:8px;color:#9A6B00;font-weight:700">Terdapat perubahan yang BELUM disinkronkan. Asesor belum menerima versi terbaru.</p>':`<p class="hint" style="margin-bottom:8px">Formulir telah tersinkron. Versi saat ini: <b>v${STORE.config.version||1}</b>.</p>`}
+    <button class="btn btn-primary btn-block" onclick="pushConfig()">Sinkronkan Formulir ke Seluruh Asesor</button>
   </div>`;
 }
 function editArea(id){
   const area=id?STORE.config.areaChecks.find(a=>a.id===id):{id:'new'+Date.now(),name:'',aspects:{Ringkas:[''],Rapi:[''],Resik:[''],Rawat:['']}};
   const isNew=!id;
   let html=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <h3>${isNew?'Tambah':'Edit'} Area Check</h3>
-    <label class="field"><span class="lbl">Nama Area Check</span>
-      <input class="input" id="ea-name" value="${esc(area.name)}" placeholder="cth: 5R Board / STK"></label>`;
+    <h3>${isNew?'Tambah':'Ubah'} Area Pemeriksaan</h3>
+    <label class="field"><span class="lbl">Nama Area Pemeriksaan</span>
+      <input class="input" id="ea-name" value="${esc(area.name)}" placeholder="contoh: Papan 5R / STK"></label>`;
   ASPECTS.forEach(asp=>{
     const krit=area.aspects[asp]||[];
     html+=`<div style="margin-bottom:14px"><div class="aspect-head"><span class="tag5r t-${asp}">${asp.toUpperCase()}</span></div>
       <div id="ea-${asp}">`;
     krit.forEach((k,i)=>{html+=critRow(asp,i,k);});
-    html+=`</div><button class="btn btn-ghost btn-sm" onclick="addCrit('${asp}')">+ kriteria</button></div>`;
+    html+=`</div><button class="btn btn-ghost btn-sm" onclick="addCrit('${asp}')">+ Tambah Kriteria</button></div>`;
   });
   html+=`<div style="display:flex;gap:10px;margin-top:8px">
-    <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batal</button>
+    <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
     <button class="btn btn-primary" style="flex:1" onclick="saveArea('${area.id}',${isNew})">Simpan</button></div>
     </div></div>`;
   $('#modal-root').innerHTML=html;
@@ -848,15 +873,15 @@ function saveArea(id,isNew){
   ASPECTS.forEach(asp=>{aspects[asp]=Array.from(document.querySelectorAll(`#ea-${asp} textarea`)).map(t=>t.value.trim()).filter(Boolean);});
   if(isNew){STORE.config.areaChecks.push({id:id,name,aspects});}
   else{const a=STORE.config.areaChecks.find(x=>x.id===id);a.name=name;a.aspects=aspects;}
-  STORE.config._dirty=true;saveStore();closeModal();renderAdmin();toast('Area tersimpan');
+  STORE.config._dirty=true;saveStore();closeModal();renderAdmin();toast('Area telah tersimpan');
 }
-function delArea(id){if(!confirm('Hapus area check ini? Item assessment terkait akan hilang.'))return;
+function delArea(id){if(!confirm('Hapus area pemeriksaan ini? Butir penilaian terkait akan turut terhapus.'))return;
   STORE.config.areaChecks=STORE.config.areaChecks.filter(a=>a.id!==id);
   // remove from matrix
   Object.keys(STORE.config.matrix).forEach(pu=>Object.keys(STORE.config.matrix[pu]).forEach(loc=>{
     STORE.config.matrix[pu][loc]=STORE.config.matrix[pu][loc].filter(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return !!a;});
   }));
-  STORE.config._dirty=true;saveStore();renderAdmin();toast('Area dihapus');
+  STORE.config._dirty=true;saveStore();renderAdmin();toast('Area telah dihapus');
 }
 function closeModal(){$('#modal-root').innerHTML='';}
 
@@ -864,15 +889,15 @@ function admMatrix(){
   const pus=Object.keys(STORE.config.matrix);
   if(!window._mxPU)window._mxPU=pus[0];
   const pu=window._mxPU;const locs=Object.keys(STORE.config.matrix[pu]||{});
-  return `<div class="card"><h2>Form per Lokasi</h2>
-    <p class="hint">Atur area check mana yang masuk di tiap lokasi. Centang = dinilai di lokasi itu.</p>
+  return `<div class="card"><h2>Formulir per Lokasi</h2>
+    <p class="hint">Atur area pemeriksaan yang berlaku pada setiap lokasi. Tanda centang berarti area tersebut dinilai pada lokasi itu.</p>
     <label class="field"><span class="lbl">Production Unit</span>
       <select class="input" onchange="window._mxPU=this.value;renderAdmin()">${pus.map(p=>`<option ${p===pu?'selected':''}>${esc(p)}</option>`).join('')}</select></label>
     <button class="btn btn-amber btn-sm" onclick="addLoc()">+ Tambah Lokasi</button>
     </div>
     ${locs.map(loc=>`<div class="card"><div style="display:flex;align-items:center;margin-bottom:10px">
       <h2 style="margin:0;font-size:16px">${esc(loc)}</h2>
-      <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="delLoc('${esc(loc)}')">Hapus lokasi</button></div>
+      <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="delLoc('${esc(loc)}')">Hapus Lokasi</button></div>
       ${STORE.config.areaChecks.map(a=>{
         const on=(STORE.config.matrix[pu][loc]||[]).includes(a.name);
         return `<label style="display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px">
@@ -891,7 +916,7 @@ function toggleArea(pu,loc,areaId,on){
   saveStore();
 }
 function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];STORE.config._dirty=true;saveStore();renderAdmin();}
-function delLoc(loc){if(!confirm('Hapus lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];STORE.config._dirty=true;saveStore();renderAdmin();}
+function delLoc(loc){if(!confirm('Hapus Lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];STORE.config._dirty=true;saveStore();renderAdmin();}
 
 /* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
 function targetLoc(pu,loc){const t=STORE.config.targets||{};return t[pu+'::'+loc]||0;}
@@ -913,8 +938,8 @@ function admTarget(){
   const wOk=totalW===100;
   const pus=Object.keys(STORE.config.matrix);
   const nas=targetNasional();
-  let html=`<div class="card"><h2>Bobot Nilai Final</h2>
-    <p class="hint">Nilai final = (Mid Year × bobot) + (End Year × bobot). Total harus 100%.</p>
+  let html=`<div class="card"><h2>Bobot Nilai Akhir</h2>
+    <p class="hint">Nilai akhir dihitung dari (Mid Year × bobot) ditambah (End Year × bobot). Total bobot harus 100%.</p>
     <div style="display:flex;gap:10px">
       <label class="field" style="flex:1"><span class="lbl">Bobot Mid Year (%)</span>
         <input class="input" type="number" min="0" max="100" step="1" value="${w.midYear}" style="text-align:center"
@@ -924,11 +949,11 @@ function admTarget(){
           onchange="setWeight('endYear',this.value)"></label>
     </div>
     <div style="padding:10px;border-radius:10px;text-align:center;font-weight:700;font-size:13px;background:${wOk?'#EAF5EC':'#FBEEEC'};color:${wOk?'var(--green)':'var(--red)'}">
-      ${wOk?'✓ Total bobot 100% — valid':'⚠️ Total bobot = '+totalW+'% — HARUS 100%! Perbaiki sebelum dipakai.'}
+      ${wOk?'Total bobot 100% — telah sesuai':'Total bobot = '+totalW+'% — harus 100%. Mohon diperbaiki sebelum digunakan.'}
     </div>
   </div>
   <div class="card"><h2>Target Nilai per Lokasi</h2>
-    <p class="hint">Atur target nilai (1–5) tiap lokasi/zona. Target PU & Nasional dihitung otomatis (rata-rata lokasi).</p>
+    <p class="hint">Atur target nilai (1–5) pada setiap lokasi/zona. Target PU dan Nasional dihitung otomatis sebagai rata-rata lokasi.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       ${pus.map(pu=>{const tp=targetPU(pu);return `<div style="flex:1;min-width:90px;text-align:center;padding:10px;background:var(--concrete);border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:20px;color:var(--green)">${tp?tp.toFixed(2):'—'}</div>
@@ -953,21 +978,21 @@ function admTarget(){
     html+=`</div>`;
   });
   html+=`<div class="card">
-    <p class="hint">Setelah atur target, sebarkan ke semua asesor lewat tab Backup → Sinkronkan Form.</p>
-    ${SYNC_URL?`<button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Target & Form ke Semua</button>`:''}
+    <p class="hint">Setelah atur target, sebarkan ke semua asesor lewat tab Pencadangan → Sinkronkan Form.</p>
+    ${SYNC_URL?`<button class="btn btn-primary btn-block" onclick="pushConfig()">Sinkronkan Target dan Formulir ke Seluruh Asesor</button>`:''}
   </div>`;
   return html;
 }
 function setTarget(pu,loc,v){
   const n=parseFloat(v);
-  if(isNaN(n)||n<1||n>5){toast('Target harus 1–5');renderAdmin();return;}
+  if(isNaN(n)||n<1||n>5){toast('Target harus berada pada rentang 1–5');renderAdmin();return;}
   STORE.config.targets[pu+'::'+loc]=Math.round(n*100)/100;
   STORE.config._dirty=true;
   saveStore();renderAdmin();
 }
 function setWeight(which,v){
   const n=parseFloat(v);
-  if(isNaN(n)||n<0||n>100){toast('Bobot harus 0–100');renderAdmin();return;}
+  if(isNaN(n)||n<0||n>100){toast('Bobot harus berada pada rentang 0–100');renderAdmin();return;}
   STORE.config.weights=STORE.config.weights||{midYear:35,endYear:65};
   STORE.config.weights[which]=Math.round(n);
   STORE.config._dirty=true;
@@ -975,21 +1000,21 @@ function setWeight(which,v){
 }
 
 function admSessions(){
-  if(!STORE.sessions.length)return `<div class="empty"><div class="ic">📋</div>Belum ada assessment tersimpan.</div>`;
+  if(!STORE.sessions.length)return `<div class="empty"><div class="ic">📋</div>Belum terdapat penilaian yang tersimpan.</div>`;
   const pending=STORE.sessions.filter(s=>!s.synced).length;
-  const syncBar=SYNC_URL?`<button class="btn btn-primary btn-block btn-sm" style="margin-bottom:12px" onclick="syncAllUnsynced()">☁ Kirim Semua ke Google${pending?` (${pending} belum)`:' ✓'}</button>`:'';
+  const syncBar=SYNC_URL?`<button class="btn btn-primary btn-block btn-sm" style="margin-bottom:12px" onclick="syncAllUnsynced()">Kirim Seluruh Data ke Google${pending?` (${pending} belum tersinkron)`:' ✓'}</button>`:'';
   return syncBar+STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
-    const sync=s.synced?'<span style="font-size:10px;color:var(--lime);font-weight:700">☁ tersinkron</span>':'<span style="font-size:10px;color:var(--amber);font-weight:700">● belum sync</span>';
-    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
+    const sync=s.synced?'<span style="font-size:10px;color:var(--lime);font-weight:700">Tersinkron</span>':'<span style="font-size:10px;color:var(--amber);font-weight:700">Belum Tersinkron</span>';
+    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(s.jenis):''} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
       <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${s.avg?s.avg.toFixed(2):'—'}</span>
       ${SYNC_URL?`<button class="btn btn-ghost btn-sm" onclick="syncSession('${s.id}')">☁</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openSession('${s.id}')">Buka</button>
       <button class="btn btn-danger btn-sm" onclick="delSession('${s.id}')">✕</button></div>`;
   }).join('');
 }
-function delSession(id){if(!confirm('Hapus data assessment ini?'))return;STORE.sessions=STORE.sessions.filter(s=>s.id!==id);saveStore();renderAdmin();}
+function delSession(id){if(!confirm('Hapus data penilaian ini?'))return;STORE.sessions=STORE.sessions.filter(s=>s.id!==id);saveStore();renderAdmin();}
 
-/* ===== FITUR 2: Pantau Semua (tarik dari Google) ===== */
+/* ===== FITUR 2: Pemantauan Menyeluruh (tarik dari Google) ===== */
 let PANTAU_FILTER={pu:'',asesor:''};
 async function loadPantau(){
   const b=$('#adm-body');if(!b)return;
@@ -999,7 +1024,7 @@ async function loadPantau(){
     if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
     window._pantauData=out.assessments||[];
     renderPantau();
-  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal ambil data (sinyal?).<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadPantau()">Coba lagi</button></div>`;}
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadPantau()">Coba Lagi</button></div>`;}
 }
 function renderPantau(){
   const b=$('#adm-body');if(!b)return;
@@ -1013,26 +1038,26 @@ function renderPantau(){
   b.innerHTML=`
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <h2 style="margin:0">Pantau Semua</h2>
-        <button class="btn btn-ghost btn-sm" onclick="loadPantau()">↻ Refresh</button>
+        <h2 style="margin:0">Pemantauan Menyeluruh</h2>
+        <button class="btn btn-ghost btn-sm" onclick="loadPantau()">Perbarui</button>
       </div>
-      <p class="hint">Data dari semua asesor yang sudah dikirim ke Google.</p>
+      <p class="hint">Data dari seluruh asesor yang telah dikirim ke Google.</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <select class="input" style="flex:1;min-width:120px" onchange="PANTAU_FILTER.pu=this.value;renderPantau()">
-          <option value="">Semua PU</option>${pus.map(p=>`<option ${p===PANTAU_FILTER.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+          <option value="">Seluruh PU</option>${pus.map(p=>`<option ${p===PANTAU_FILTER.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
         <select class="input" style="flex:1;min-width:120px" onchange="PANTAU_FILTER.asesor=this.value;renderPantau()">
-          <option value="">Semua Asesor</option>${asesors.map(a=>`<option ${a===PANTAU_FILTER.asesor?'selected':''}>${esc(a)}</option>`).join('')}</select>
+          <option value="">Seluruh Asesor</option>${asesors.map(a=>`<option ${a===PANTAU_FILTER.asesor?'selected':''}>${esc(a)}</option>`).join('')}</select>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green)">${total}</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">ASSESSMENT</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">PENILAIAN</div></div>
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:${gradeFor(avg).color}">${avg?avg.toFixed(2):'—'}</div>
         <div style="font-size:11px;color:var(--muted);font-weight:700">RATA-RATA</div></div>
     </div>
-    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data ter-sync.</div>':
+    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum terdapat data yang tersinkron.</div>':
     rows.slice().reverse().map(x=>{const g=gradeFor(Number(x['Nilai Akhir'])||0);
       return `<div class="list-row"><div class="nm">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}
         <div style="font-size:12px;color:var(--muted);font-weight:400">${esc(x['Periode']||'')} · ${esc(x['Tanggal']||'')} · ${esc(x['Asesor']||'')}${x['Sync Count']?' · sync '+x['Sync Count']+'×':''}</div></div>
@@ -1045,51 +1070,51 @@ function admData(){
   const used=storageUsage(),pct=Math.min(100,Math.round(used/(5*1024*1024)*100));
   const mb=(used/1024/1024).toFixed(2);
   const barColor=pct>85?'var(--red)':pct>60?'var(--amber)':'var(--lime)';
-  return `<div class="card"><h2>Penyimpanan Perangkat</h2>
-    <p class="hint">Terpakai ~${mb} MB dari ±5 MB (${pct}%). Foto paling banyak makan tempat.</p>
+  return `<div class="card"><h2>Penyimpanan pada Perangkat</h2>
+    <p class="hint">Terpakai kurang lebih ${mb} MB dari sekitar 5 MB (${pct}%). Foto merupakan penyumbang penggunaan ruang terbesar.</p>
     <div class="bar" style="height:10px;background:#DCE4DF;border-radius:99px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:${pct}%;background:${barColor};border-radius:99px"></div></div>
-    ${pct>85?'<div class="login-err" style="background:var(--red)">Hampir penuh! Backup lalu hapus data lama.</div>':''}
+    ${pct>85?'<div class="login-err" style="background:var(--red)">Hampir penuh! Pencadangan lalu hapus data lama.</div>':''}
   </div>
-  <div class="card"><h2>Backup & Restore</h2>
-    <p class="hint">Data tersimpan di perangkat ini saja. Backup berkala agar tidak hilang.</p>
-    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="backupData()">⬇ Unduh Backup (JSON)</button>
-    <label class="btn btn-ghost btn-block" style="margin-bottom:10px">⬆ Pulihkan dari Backup<input type="file" accept=".json" style="display:none" onchange="restoreData(this)"></label>
-    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="syncSeed()">↻ Perbarui Klausul dari Seed (aman, data tetap)</button>
-    <button class="btn btn-danger btn-block" onclick="resetData()">⟲ Reset ke Data Awal</button>
+  <div class="card"><h2>Pencadangan & Restore</h2>
+    <p class="hint">Data tersimpan di perangkat ini saja. Pencadangan berkala agar tidak hilang.</p>
+    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="backupData()">⬇ Unduh Pencadangan (JSON)</button>
+    <label class="btn btn-ghost btn-block" style="margin-bottom:10px">⬆ Pulihkan dari Pencadangan<input type="file" accept=".json" style="display:none" onchange="restoreData(this)"></label>
+    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="syncSeed()">Perbarui Klausul dari Data Awal (aman, data tetap tersimpan)</button>
+    <button class="btn btn-danger btn-block" onclick="resetData()">Kembalikan ke Data Awal</button>
   </div>
-  ${SYNC_URL?`<div class="card"><h2>Sinkronisasi Form (Online)</h2>
-    <p class="hint">Sebarkan perubahan area & klausul ke SEMUA asesor. Mereka dapat versi terbaru saat membuka app dalam keadaan online. Versi form saat ini: <b>v${STORE.config.version||1}</b>.</p>
-    <button class="btn btn-primary btn-block" onclick="pushConfig()">☁ Sinkronkan Form ke Semua Asesor</button>
-    <p class="hint" style="margin-top:8px;margin-bottom:0">⚠️ Pastikan form sudah benar sebelum sinkron — perubahan langsung kena ke semua. Versi naik otomatis tiap sinkron.</p>
+  ${SYNC_URL?`<div class="card"><h2>Sinkronisasi Formulir (Daring)</h2>
+    <p class="hint">Sebarkan perubahan area dan klausul ke SELURUH asesor. Pembaruan akan diterima saat aplikasi dibuka dalam keadaan daring. Versi formulir saat ini: <b>v${STORE.config.version||1}</b>.</p>
+    <button class="btn btn-primary btn-block" onclick="pushConfig()">Sinkronkan Formulir ke Seluruh Asesor</button>
+    <p class="hint" style="margin-top:8px;margin-bottom:0">Pastikan formulir sudah benar sebelum disinkronkan — perubahan akan langsung berlaku bagi seluruh pengguna. Versi akan naik secara otomatis setiap kali disinkronkan.</p>
   </div>`:''}`;
 }
 function pushConfig(){
-  if(!SYNC_URL){alert('SYNC_URL belum diisi.');return;}
-  if(!confirm('Sinkronkan form ke semua asesor? Versi form akan dinaikkan dan disebarkan. Pastikan form sudah benar.'))return;
+  if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
+  if(!confirm('Sinkronkan formulir ke seluruh asesor? Versi formulir akan dinaikkan dan disebarkan. Pastikan formulir telah benar.'))return;
   // naikkan versi config & bersihkan tanda dirty (perubahan ini yang jadi sumber kebenaran)
   STORE.config.version=(STORE.config.version||1)+1;
   delete STORE.config._dirty;
   saveStore();
-  toast('Mengirim form ke Google…');
+  toast('Sedang mengirim formulir ke Google…');
   fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:STORE.config})})
     .then(r=>r.json()).then(out=>{
       if(out.ok){
-        alert('✓ BERHASIL\n\nForm & target sudah disinkronkan ke versi '+(out.version||STORE.config.version)+'.\n\nSemua asesor akan mendapat pembaruan saat membuka aplikasi dalam keadaan online.');
+        alert('BERHASIL\n\nFormulir dan target telah disinkronkan ke versi '+(out.version||STORE.config.version)+'.\n\nSeluruh asesor akan menerima pembaruan saat membuka aplikasi dalam keadaan daring.');
         renderAdmin();
       }else{
-        alert('✗ GAGAL menyinkronkan form.\n\nPenyebab: '+(out.error||'tidak diketahui')+'\n\nSilakan coba lagi.');
+        alert('GAGAL menyinkronkan formulir.\n\nPenyebab: '+(out.error||'tidak diketahui')+'\n\nSilakan coba kembali.');
       }
-    }).catch(e=>alert('✗ GAGAL mengirim (cek sinyal/koneksi).\n\nDetail: '+e.message));
+    }).catch(e=>alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message));
 }
-function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Backup diunduh');}
-function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data dipulihkan');renderAdmin();}catch(err){toast('File backup tidak valid');}};r.readAsText(f);}
-function resetData(){if(!confirm('Reset semua ke data awal? Assessment tersimpan akan hilang.'))return;localStorage.removeItem(LS_KEY);STORE=loadStore();saveStore();renderAdmin();toast('Data direset');}
+function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Pencadangan diunduh');}
+function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data telah dipulihkan');renderAdmin();}catch(err){toast('Berkas cadangan tidak valid');}};r.readAsText(f);}
+function resetData(){if(!confirm('Kembalikan seluruh data ke kondisi awal? Penilaian yang tersimpan akan hilang.'))return;localStorage.removeItem(LS_KEY);STORE=loadStore();saveStore();renderAdmin();toast('Data telah dikembalikan ke kondisi awal');}
 function syncSeed(){
-  if(!confirm('Perbarui daftar area & klausul ke versi seed terbaru? Assessment tersimpan TIDAK dihapus.'))return;
+  if(!confirm('Perbarui daftar area dan klausul ke versi data awal terbaru? Penilaian yang tersimpan TIDAK akan dihapus.'))return;
   STORE.config=JSON.parse(JSON.stringify(SEED_DATA));
   STORE.sessions=STORE.sessions||[];
-  saveStore();renderAdmin();toast('Klausul diperbarui dari seed');
+  saveStore();renderAdmin();toast('Klausul telah diperbarui dari data awal');
 }
 
 /* ---------- Warning sebelum nutup halaman saat mengisi ---------- */
@@ -1099,30 +1124,30 @@ function findingsCard(d){
   const open=f.filter(x=>x.status==='Open').length, close=f.filter(x=>x.status==='Close').length;
   const pctClose=f.length?Math.round(close/f.length*100):0;
   return `<div class="card">
-    <h2>Temuan & Tindak Lanjut</h2>
-    <p class="hint">${f.length} temuan (otomatis dari aspek bernilai rendah ≤2). Bisa edit, tambah, atau hapus.</p>
+    <h2>Temuan dan Tindak Lanjut</h2>
+    <p class="hint">${f.length} temuan, terbentuk otomatis dari aspek bernilai rendah (≤2). Dapat diubah, ditambah, atau dihapus.</p>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">OPEN</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">TERBUKA</div></div>
       <div style="flex:1;text-align:center;padding:12px;background:#EAF5EC;border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green-400)">${close}</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">CLOSE</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">SELESAI</div></div>
       <div style="flex:1;text-align:center;padding:12px;background:var(--concrete);border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green)">${pctClose}%</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">% CLOSE</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">% SELESAI</div></div>
     </div>
-    <button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" onclick="regenTemuan()">↻ Buat ulang temuan dari nilai (timpa temuan otomatis)</button>
+    <button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" onclick="regenTemuan()">Buat Ulang Temuan dari Nilai (menimpa temuan otomatis)</button>
     <button class="btn btn-primary btn-block" onclick="VIEW='findings';render()">Kelola Temuan →</button>
   </div>`;
 }
 function regenTemuan(){
   if(isLocked())return lockBlock();
-  if(!confirm('Buat ulang temuan otomatis dari aspek bernilai ≤2? Temuan yang kamu tambah/edit manual akan tetap dipertahankan.'))return;
+  if(!confirm('Buat ulang temuan otomatis dari aspek bernilai ≤2? Temuan yang ditambahkan atau diubah secara manual akan tetap dipertahankan.'))return;
   const auto=generateFindings(DRAFT);
   const manual=(DRAFT.findings||[]).filter(f=>!f.auto); // simpan yang manual
   DRAFT.findings=auto.concat(manual);
-  saveDraftSession();render();toast('Temuan diperbarui dari nilai');
+  saveDraftSession();render();toast('Temuan telah diperbarui berdasarkan nilai');
 }
 
 function renderFindings(){
@@ -1131,55 +1156,63 @@ function renderFindings(){
   <div class="wrap">
     <div class="card">
       <h2>Daftar Temuan</h2>
-      <p class="hint">${f.length} temuan. Tap untuk edit detail, perbaikan, & status.</p>
+      <p class="hint">${f.length} temuan. Ketuk untuk mengubah rincian, tindak lanjut, dan status.</p>
       <button class="btn btn-amber btn-block" onclick="editFinding(null)">+ Tambah Temuan Manual</button>
     </div>
-    ${f.length?f.map(x=>findingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Belum ada temuan. Bagus!</div>'}
+    ${f.length?f.map(x=>findingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Belum terdapat temuan.</div>'}
   </div>
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='report';render()">‹ Kembali ke Hasil</button></div>`;
 }
 function findingRow(x){
   const stColor=x.status==='Close'?'var(--green-400)':'var(--red)';
+  const berulangTag=x.berulang==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px">BERULANG</span>`:'';
   return `<div class="card" style="padding:14px" onclick="editFinding('${x.id}')">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
       <span class="tag5r t-${x.kategori}">${(x.kategori||'').toUpperCase()}</span>
+      ${berulangTag}
       <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(x.status)}</span>
     </div>
     <div style="font-weight:700;font-size:13px;margin-bottom:3px">${esc(x.area)}</div>
     <div style="font-size:13px;color:var(--muted)">${esc(x.deskripsi||'(tanpa deskripsi)')}</div>
+    ${x.penyebab?`<div style="font-size:11px;color:var(--muted);margin-top:4px">Penyebab: <b>${esc(x.penyebab)}</b></div>`:''}
     ${x.saran?`<div style="font-size:12px;color:var(--green-400);margin-top:6px">↳ ${esc(x.saran)}</div>`:''}
   </div>`;
 }
 function editFinding(id){
   const d=DRAFT;
   const isNew=!id;
-  const x=id?d.findings.find(f=>f.id===id):{id:'f'+Date.now()+Math.random().toString(36).slice(2,6),area:d.areas.length?(STORE.config.areaChecks.find(a=>a.id===d.areas[0])||{}).name||'':'',kategori:'Ringkas',r5:'R1',deskripsi:'',foto:'',saran:'',target:String(new Date().getFullYear()),fotoPerbaikan:'',deskPerbaikan:'',tglPerbaikan:'',status:'Open',verifikator:''};
+  const x=id?d.findings.find(f=>f.id===id):{id:'f'+Date.now()+Math.random().toString(36).slice(2,6),area:d.areas.length?(STORE.config.areaChecks.find(a=>a.id===d.areas[0])||{}).name||'':'',kategori:'Ringkas',r5:'R1',deskripsi:'',foto:'',penyebab:'',saran:'',target:String(new Date().getFullYear()),fotoPerbaikan:'',deskPerbaikan:'',tglPerbaikan:'',status:'Open',verifikator:''};
   const areaOpts=STORE.config.areaChecks.map(a=>`<option ${a.name===x.area?'selected':''}>${esc(a.name)}</option>`).join('');
   const katOpts=['Ringkas','Rapi','Resik','Rawat','Rajin'].map(k=>`<option ${k===x.kategori?'selected':''}>${k}</option>`).join('');
+  const penyebabOpts=['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya']
+    .map(p=>`<option value="${esc(p)}" ${p===x.penyebab?'selected':''}>${p===''?'— Pilih penyebab —':esc(p)}</option>`).join('');
+  const berulangBadge=x.auto&&x.berulang==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px;margin-left:6px">TEMUAN BERULANG</span>`:'';
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <h3>${isNew?'Tambah':'Edit'} Temuan</h3>
+    <h3>${isNew?'Tambah':'Ubah'} Temuan ${berulangBadge}</h3>
     <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
-    <label class="field"><span class="lbl">Area Check</span><select class="input" id="ef-area">${areaOpts}</select></label>
+    <label class="field"><span class="lbl">Area Pemeriksaan</span><select class="input" id="ef-area">${areaOpts}</select></label>
     <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="ef-kat">${katOpts}</select></label>
     <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="ef-desk" style="min-height:60px">${esc(x.deskripsi||'')}</textarea></label>
-    <label class="field"><span class="lbl">Foto Temuan</span>
+    <label class="field"><span class="lbl">Dokumentasi Foto Temuan</span>
       <div class="photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="efRmPhoto('foto')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('foto',this)"></label>`}</div>
     </label>
-    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · PERBAIKAN</div>
-    <label class="field"><span class="lbl">Saran Perbaikan</span><textarea class="input" id="ef-saran" style="min-height:50px">${esc(x.saran||'')}</textarea></label>
-    <label class="field"><span class="lbl">Target Perbaikan</span><input class="input" id="ef-target" value="${esc(x.target||'')}" placeholder="cth: 2026"></label>
-    <label class="field"><span class="lbl">Deskripsi Perbaikan</span><textarea class="input" id="ef-deskp" style="min-height:50px">${esc(x.deskPerbaikan||'')}</textarea></label>
-    <label class="field"><span class="lbl">Tanggal Perbaikan</span><input class="input" id="ef-tglp" type="date" value="${esc((x.tglPerbaikan||'').slice(0,10))}"></label>
-    <label class="field"><span class="lbl">Foto Perbaikan</span>
+    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · TINDAK LANJUT</div>
+    <label class="field"><span class="lbl">Penyebab (Root Cause)</span><select class="input" id="ef-penyebab">${penyebabOpts}</select></label>
+    <p class="hint" style="margin-top:-8px;margin-bottom:12px">Pilih penyebab yang paling mendasari temuan ini. Membantu Direktorat melihat pola penyebab secara nasional, agar tindak lanjut mencegah temuan berulang.</p>
+    <label class="field"><span class="lbl">Saran Tindak Lanjut</span><textarea class="input" id="ef-saran" style="min-height:50px">${esc(x.saran||'')}</textarea></label>
+    <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" id="ef-target" value="${esc(x.target||'')}" placeholder="contoh: 2026"></label>
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="ef-deskp" style="min-height:50px">${esc(x.deskPerbaikan||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="ef-tglp" type="date" value="${esc((x.tglPerbaikan||'').slice(0,10))}"></label>
+    <label class="field"><span class="lbl">Dokumentasi Foto Tindak Lanjut</span>
       <div class="photo-row">${x.fotoPerbaikan?`<img src="${x.fotoPerbaikan}" class="photo-thumb" onclick="efRmPhoto('fotoPerbaikan')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('fotoPerbaikan',this)"></label>`}</div>
     </label>
     <div style="font-size:11px;font-weight:800;color:var(--green-400);letter-spacing:.05em;margin:14px 0 8px">C · VERIFIKASI</div>
     <label class="field"><span class="lbl">Status</span><select class="input" id="ef-status">
       <option ${x.status==='Open'?'selected':''}>Open</option><option ${x.status==='Close'?'selected':''}>Close</option></select></label>
-    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="ef-verif" value="${esc(x.verifikator||'')}" placeholder="Nama verifikator"></label>
+    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="ef-verif" value="${esc(x.verifikator||'')}" placeholder="Nama Verifikator"></label>
     <div style="display:flex;gap:10px;margin-top:8px">
       ${isNew?'':`<button class="btn btn-danger" onclick="delFinding('${x.id}')">Hapus</button>`}
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batal</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
       <button class="btn btn-primary" style="flex:1" onclick="saveFinding('${x.id}',${isNew})">Simpan</button>
     </div>
   </div></div>`;
@@ -1195,41 +1228,81 @@ function saveFinding(id,isNew){
   const kat=$('#ef-kat').value;
   const obj={id,area:$('#ef-area').value,kategori:kat,r5:R5MAP[kat],
     deskripsi:$('#ef-desk').value.trim(),foto:window._efPhoto.foto||'',
+    penyebab:$('#ef-penyebab').value,
     saran:$('#ef-saran').value.trim(),target:$('#ef-target').value.trim(),
     deskPerbaikan:$('#ef-deskp').value.trim(),tglPerbaikan:$('#ef-tglp').value,
     fotoPerbaikan:window._efPhoto.fotoPerbaikan||'',
     status:$('#ef-status').value,verifikator:$('#ef-verif').value.trim(),auto:false};
   if(isNew)d.findings.push(obj);
   else{const i=d.findings.findIndex(f=>f.id===id);if(i>=0)d.findings[i]={...d.findings[i],...obj};}
-  saveDraftSession();closeModal();renderFindings();toast('Temuan tersimpan');
+  saveDraftSession();closeModal();renderFindings();toast('Temuan telah tersimpan');
 }
-function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan dihapus');}
+function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan telah dihapus');}
+
 
 /* ============ DASHBOARD NILAI (narik cloud, admin) ============ */
 let _dashNilaiData=null;
+let DN_FILTER={tahun:'',jenis:''};   // [MT] filter tahun & jenis
+let DN_SHOWTREN=false;               // [MT] toggle view tren
 function renderDashNilai(){
-  app().innerHTML=topbar('Dashboard Nilai','Realisasi vs Target — dari Google')+`
+  app().innerHTML=topbar('Dashboard Nilai','Realisasi terhadap Target — Data dari Google')+`
   <div class="wrap" id="dn-body">
-    <div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div>
+    <div class="empty"><div class="ic">⏳</div>Sedang mengambil data dari Google…</div>
   </div>
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
   loadDashNilai();
 }
 async function loadDashNilai(){
   const b=$('#dn-body');if(!b)return;
-  if(!SYNC_URL){b.innerHTML='<div class="empty">Sync belum diaktifkan.</div>';return;}
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
   try{
     const res=await fetch(SYNC_URL+'?action=list&secret='+encodeURIComponent(SYNC_SECRET));
     const out=await res.json();
     if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
     _dashNilaiData=out.assessments||[];
     drawDashNilai();
-  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal ambil data (sinyal?).<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashNilai()">Coba lagi</button></div>`;}
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashNilai()">Coba Lagi</button></div>`;}
 }
+/* [MT] baca kolom Tahun (fallback dari Tanggal), dan Jenis (default Resmi) */
+function _rowTahun(x){
+  var t=x['Tahun'];
+  if(t!=null&&t!=='')return String(t).trim();
+  var tg=String(x['Tanggal']||'');
+  var m=tg.match(/(20\d\d)/);
+  return m?m[1]:'';
+}
+function _rowJenis(x){return (x['Jenis']||'Resmi');}
 function drawDashNilai(){
   const b=$('#dn-body');if(!b)return;
-  const rows=_dashNilaiData||[];
-  if(!rows.length){b.innerHTML='<div class="empty"><div class="ic">📊</div>Belum ada data ter-sync.</div>';return;}
+  const all=_dashNilaiData||[];
+  if(!all.length){b.innerHTML='<div class="empty"><div class="ic">📊</div>Belum terdapat data yang tersinkron.</div>';return;}
+
+  // [MT] opsi filter dari data
+  const tahunList=[...new Set(all.map(_rowTahun).filter(Boolean))].sort();
+  // [MT] terapkan filter tahun & jenis
+  let rows=all.slice();
+  if(DN_FILTER.tahun)rows=rows.filter(x=>_rowTahun(x)===DN_FILTER.tahun);
+  if(DN_FILTER.jenis)rows=rows.filter(x=>_rowJenis(x)===DN_FILTER.jenis);
+
+  // [MT] panel filter + toggle tren (selalu tampil di atas)
+  const filterPanel=`<div class="card">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+      <label class="field" style="flex:1;min-width:110px;margin:0"><span class="lbl">Tahun</span>
+        <select class="input" onchange="DN_FILTER.tahun=this.value;drawDashNilai()">
+          <option value="">Semua Tahun</option>${tahunList.map(t=>`<option ${t===DN_FILTER.tahun?'selected':''}>${esc(t)}</option>`).join('')}
+        </select></label>
+      <label class="field" style="flex:1;min-width:110px;margin:0"><span class="lbl">Jenis</span>
+        <select class="input" onchange="DN_FILTER.jenis=this.value;drawDashNilai()">
+          <option value="">Semua Jenis</option>
+          <option ${DN_FILTER.jenis==='Resmi'?'selected':''}>Resmi</option>
+          <option ${DN_FILTER.jenis==='Internal'?'selected':''}>Internal</option>
+        </select></label>
+    </div>
+    <button class="btn btn-ghost btn-block btn-sm" style="margin-top:10px" onclick="DN_SHOWTREN=!DN_SHOWTREN;drawDashNilai()">${DN_SHOWTREN?'Sembunyikan Tren Antar-Tahun':'Lihat Tren Antar-Tahun'}</button>
+    ${DN_SHOWTREN?trenAntarTahun(all):''}
+  </div>`;
+
+  if(!rows.length){b.innerHTML=filterPanel+'<div class="empty"><div class="ic">📊</div>Tidak terdapat data untuk kombinasi penyaring ini.</div>';return;}
 
   const w=STORE.config.weights||{midYear:35,endYear:65};
   const wMid=(Number(w.midYear)||0)/100, wEnd=(Number(w.endYear)||0)/100;
@@ -1272,20 +1345,20 @@ function drawDashNilai(){
     warnHtml=`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0">
       <div style="display:flex;gap:10px;align-items:flex-start">
         <span style="font-size:20px">⚠️</span>
-        <div><div style="font-weight:800;font-size:14px;margin-bottom:4px">Sebagian target nilai belum ditetapkan</div>
-        <div style="font-size:13px;color:var(--muted)">Terdapat ${tanpaTarget.length} lokasi yang sudah memiliki realisasi namun belum memiliki target. Mohon lengkapi target pada menu <b>Kelola Form → Target Nilai</b>.</div>
+        <div><div style="font-weight:800;font-size:14px;margin-bottom:4px">Sebagian Target Nilai Belum Ditetapkan</div>
+        <div style="font-size:13px;color:var(--muted)">Terdapat ${tanpaTarget.length} lokasi yang telah memiliki realisasi namun belum memiliki target. Mohon lengkapi target pada menu <b>Kelola Formulir → Target Nilai</b>.</div>
         </div></div></div>`;
   }
   // warning bobot != 100
   const totalW=(Number(w.midYear)||0)+(Number(w.endYear)||0);
   let wWarn='';
   if(totalW!==100){
-    wWarn=`<div class="card" style="background:#FBEEEC;border-color:#E6B0AA"><div style="font-weight:700;color:var(--red);font-size:13px">⚠️ Total bobot Mid+End = ${totalW}% (harus 100%). Nilai final mungkin tidak akurat. Perbaiki di Kelola Form → Target Nilai.</div></div>`;
+    wWarn=`<div class="card" style="background:#FBEEEC;border-color:#E6B0AA"><div style="font-weight:700;color:var(--red);font-size:13px">Total bobot Mid ditambah End = ${totalW}% (harus 100%). Nilai final mungkin tidak akurat. Perbaiki di Kelola Formulir → Target Nilai.</div></div>`;
   }
 
   // ===== HERO: Nilai Final Tertimbang =====
-  let html=warnHtml+wWarn+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
-    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI FINAL NASIONAL ${semuaLengkap?'(TERTIMBANG)':'(SEMENTARA · Mid Year)'}</div>
+  let html=filterPanel+warnHtml+wWarn+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
+    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI AKHIR NASIONAL ${semuaLengkap?'(TERTIMBANG)':'(SEMENTARA · Mid Year)'}${DN_FILTER.tahun?' · '+esc(DN_FILTER.tahun):''}${DN_FILTER.jenis?' · '+esc(DN_FILTER.jenis):''}</div>
     <div style="font-family:Archivo;font-weight:800;font-size:46px;line-height:1;margin:4px 0">${nasFinal?nasFinal.toFixed(2):'—'}</div>
     <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasFinal,nasTarget)}</div>
     <div style="font-size:11px;opacity:.7;margin-top:8px">Mid Year: ${nasMid?nasMid.toFixed(2):'—'} (${w.midYear}%) · End Year: ${nasEnd?nasEnd.toFixed(2):'—'} (${w.endYear}%)</div>
@@ -1304,7 +1377,7 @@ function drawDashNilai(){
   </div>`;
 
   // ===== TABEL KPI =====
-  html+=`<div class="card"><h2 style="font-size:16px">Tabel KPI — Realisasi vs Target</h2>
+  html+=`<div class="card"><h2 style="font-size:16px">Tabel Indikator Kinerja — Realisasi terhadap Target</h2>
     <table class="rep"><thead><tr><th>PU</th><th class="num">Mid</th><th class="num">End</th><th class="num">Final</th><th class="num">Target</th><th class="num">Capai</th></tr></thead><tbody>
     ${puRows.map(p=>{
       const pc=p.target?Math.round(p.final/p.target*100):0;
@@ -1325,37 +1398,83 @@ function drawDashNilai(){
     </tbody></table></div>`;
 
   // ===== GRAFIK realisasi vs target (final per PU) =====
-  html+=`<div class="card"><h2 style="font-size:16px">Grafik Final vs Target per PU</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.final,target:p.target})))}</div>`;
+  html+=`<div class="card"><h2 style="font-size:16px">Grafik Nilai Akhir terhadap Target per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.final,target:p.target})))}</div>`;
 
   // ===== SIMULASI =====
-  html+=`<div class="card"><h2 style="font-size:16px">🎯 Simulasi Target</h2>
-    <p class="hint">Hitung skenario nilai final. Bobot: Mid ${w.midYear}% · End ${w.endYear}%.</p>
+  html+=`<div class="card"><h2 style="font-size:16px">Simulasi Pencapaian Target</h2>
+    <p class="hint">Hitung skenario nilai akhir. Bobot: Mid ${w.midYear}% · End ${w.endYear}%.</p>
     <div class="seg" style="background:var(--concrete);margin-bottom:10px">
-      <button class="${SIM_MODE==='reverse'?'on':''}" style="color:${SIM_MODE==='reverse'?'#fff':'var(--muted)'};background:${SIM_MODE==='reverse'?'var(--green)':'transparent'}" onclick="SIM_MODE='reverse';drawDashNilai()">End butuh berapa?</button>
-      <button class="${SIM_MODE==='predict'?'on':''}" style="color:${SIM_MODE==='predict'?'#fff':'var(--muted)'};background:${SIM_MODE==='predict'?'var(--green)':'transparent'}" onclick="SIM_MODE='predict';drawDashNilai()">Prediksi final</button>
+      <button class="${SIM_MODE==='reverse'?'on':''}" style="color:${SIM_MODE==='reverse'?'#fff':'var(--muted)'};background:${SIM_MODE==='reverse'?'var(--green)':'transparent'}" onclick="SIM_MODE='reverse';drawDashNilai()">Berapa Nilai End yang Dibutuhkan?</button>
+      <button class="${SIM_MODE==='predict'?'on':''}" style="color:${SIM_MODE==='predict'?'#fff':'var(--muted)'};background:${SIM_MODE==='predict'?'var(--green)':'transparent'}" onclick="SIM_MODE='predict';drawDashNilai()">Prediksi Nilai Akhir</button>
     </div>
-    <label class="field"><span class="lbl">Pilih cakupan</span>
+    <label class="field"><span class="lbl">Pilih Cakupan</span>
       <select class="input" id="sim-scope">
         <option value="nasional" ${SIM.scope==='nasional'?'selected':''}>Nasional</option>
         ${pus.map(p=>`<option value="${esc(p)}" ${SIM.scope===p?'selected':''}>${esc(p)}</option>`).join('')}
       </select></label>
     ${SIM_MODE==='reverse'?`
-      <label class="field"><span class="lbl">Nilai Mid Year (aktual/asumsi)</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="cth 3.5"></label>
-      <label class="field"><span class="lbl">Target Final yang ingin dicapai</span><input class="input" id="sim-target" type="number" step="0.01" min="1" max="5" value="${SIM.target||''}" placeholder="cth 4.0"></label>
-      <button class="btn btn-primary btn-block" onclick="runSimReverse()">Hitung End Year yang dibutuhkan</button>
+      <label class="field"><span class="lbl">Nilai Mid Year (aktual/asumsi)</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="contoh 3,5"></label>
+      <label class="field"><span class="lbl">Target Nilai Akhir yang Ingin Dicapai</span><input class="input" id="sim-target" type="number" step="0.01" min="1" max="5" value="${SIM.target||''}" placeholder="contoh 4,0"></label>
+      <button class="btn btn-primary btn-block" onclick="runSimReverse()">Hitung Nilai End Year yang Dibutuhkan</button>
     `:`
-      <label class="field"><span class="lbl">Nilai Mid Year</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="cth 3.5"></label>
-      <label class="field"><span class="lbl">Nilai End Year</span><input class="input" id="sim-end" type="number" step="0.01" min="1" max="5" value="${SIM.end||''}" placeholder="cth 4.2"></label>
-      <button class="btn btn-primary btn-block" onclick="runSimPredict()">Hitung nilai final</button>
+      <label class="field"><span class="lbl">Nilai Mid Year</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="contoh 3,5"></label>
+      <label class="field"><span class="lbl">Nilai End Year</span><input class="input" id="sim-end" type="number" step="0.01" min="1" max="5" value="${SIM.end||''}" placeholder="contoh 4,2"></label>
+      <button class="btn btn-primary btn-block" onclick="runSimPredict()">Hitung Nilai Akhir</button>
     `}
     <div id="sim-result"></div>
   </div>`;
 
-  html+=`<div class="card"><button class="btn btn-ghost btn-block" onclick="loadDashNilai()">↻ Refresh dari Google</button></div>`;
+  html+=`<div class="card"><button class="btn btn-ghost btn-block" onclick="loadDashNilai()">Perbarui dari Google</button></div>`;
   b.innerHTML=html;
   // render hasil simulasi terakhir kalau ada
   if(SIM.lastResult){$('#sim-result').innerHTML=SIM.lastResult;}
 }
+
+/* [MT] Tren antar-tahun: rata-rata Nilai Akhir per PU per tahun (ikut filter jenis) */
+function trenAntarTahun(allRows){
+  const jenisF=DN_FILTER.jenis;
+  const acc={}; // pu -> tahun -> {sum,n}
+  (allRows||[]).forEach(x=>{
+    if(jenisF && _rowJenis(x)!==jenisF)return;
+    const pu=x['PU']||'-'; const th=_rowTahun(x); if(!th)return;
+    const nv=Number(x['Nilai Akhir']); if(!nv)return;
+    acc[pu]=acc[pu]||{}; acc[pu][th]=acc[pu][th]||{sum:0,n:0};
+    acc[pu][th].sum+=nv; acc[pu][th].n++;
+  });
+  const puList=Object.keys(acc).sort();
+  const thSet={}; puList.forEach(pu=>Object.keys(acc[pu]).forEach(t=>thSet[t]=1));
+  const thList=Object.keys(thSet).sort();
+  if(!thList.length)return '<p class="hint" style="margin-top:10px">Belum terdapat data untuk tren.</p>';
+
+  // SVG line chart sederhana (skala 1-5)
+  const W=300,H=190,padL=30,padB=26,padT=14,padR=10;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const xPos=i=>thList.length===1?padL+plotW/2:padL+plotW*i/(thList.length-1);
+  const yPos=v=>padT+plotH*(1-(v-1)/4);
+  const palette=['#2a78d6','#1baf7a','#eda100','#9085e9','#e66767','#16A085'];
+  let grid='';
+  for(let g=1;g<=5;g++){const y=yPos(g);grid+=`<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#E4EBE6"/><text x="${padL-6}" y="${y+3}" font-size="9" fill="#889" text-anchor="end">${g}</text>`;}
+  let xlab='';thList.forEach((t,i)=>{xlab+=`<text x="${xPos(i)}" y="${H-8}" font-size="9" fill="#556" text-anchor="middle">${esc(t)}</text>`;});
+  let lines='',legend='';
+  puList.forEach((pu,si)=>{
+    const col=palette[si%palette.length];
+    let dpath='',started=false,dots='';
+    thList.forEach((t,i)=>{
+      const c=acc[pu][t]; if(!c)return;
+      const v=c.sum/c.n, X=xPos(i), Y=yPos(v);
+      dpath+=(started?'L':'M')+X.toFixed(1)+' '+Y.toFixed(1)+' '; started=true;
+      dots+=`<circle cx="${X.toFixed(1)}" cy="${Y.toFixed(1)}" r="3" fill="${col}"/><text x="${(X+4).toFixed(1)}" y="${(Y-5).toFixed(1)}" font-size="8" fill="${col}">${v.toFixed(2)}</text>`;
+    });
+    lines+=`<path d="${dpath}" fill="none" stroke="${col}" stroke-width="2"/>${dots}`;
+    legend+=`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:11px"><span style="width:12px;height:3px;background:${col};display:inline-block"></span>${esc(pu)}</span>`;
+  });
+  return `<div style="margin-top:12px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">Tren Rata-rata Nilai per Production Unit${jenisF?' ('+esc(jenisF)+')':''}</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:420px;display:block">${grid}${xlab}${lines}</svg>
+    <div style="margin-top:6px">${legend}</div>
+  </div>`;
+}
+
 let SIM_MODE='reverse';
 let SIM={scope:'nasional',mid:'',end:'',target:'',lastResult:''};
 function _simWeights(){const w=STORE.config.weights||{midYear:35,endYear:65};return {wMid:(Number(w.midYear)||0)/100,wEnd:(Number(w.endYear)||0)/100,mp:w.midYear,ep:w.endYear};}
@@ -1363,16 +1482,16 @@ function runSimReverse(){
   const {wMid,wEnd,mp,ep}=_simWeights();
   SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.target=$('#sim-target').value;
   const mid=parseFloat(SIM.mid), tgt=parseFloat(SIM.target);
-  if(isNaN(mid)||isNaN(tgt)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Isi Mid Year & Target dulu.</div>';return;}
-  if(wEnd===0){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Bobot End Year 0%, tidak bisa dihitung.</div>';return;}
+  if(isNaN(mid)||isNaN(tgt)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Mohon isi Mid Year dan Target terlebih dahulu.</div>';return;}
+  if(wEnd===0){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Bobot End Year 0%, perhitungan tidak dapat dilakukan.</div>';return;}
   // final = mid*wMid + end*wEnd  =>  end = (target - mid*wMid)/wEnd
   const endNeeded=(tgt-mid*wMid)/wEnd;
   let note='',col='var(--green)';
-  if(endNeeded>5){note='⚠️ Tidak mungkin tercapai — butuh End Year > 5 (di luar skala).';col='var(--red)';}
-  else if(endNeeded<1){note='✓ Sudah pasti tercapai — bahkan End Year minimum (1) sudah melewati target.';col='var(--green)';}
-  else note='Untuk capai target final '+tgt.toFixed(2)+', End Year harus minimal segini.';
+  if(endNeeded>5){note='Tidak mungkin tercapai — membutuhkan nilai End Year di atas 5 (di luar skala).';col='var(--red)';}
+  else if(endNeeded<1){note='Target sudah pasti tercapai — bahkan dengan End Year minimum (1) sekalipun.';col='var(--green)';}
+  else note='Untuk mencapai target nilai akhir '+tgt.toFixed(2)+', nilai End Year harus mencapai minimal angka tersebut.';
   SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
-    <div style="font-size:11px;color:var(--muted);font-weight:700">END YEAR YANG DIBUTUHKAN (${esc(SIM.scope)})</div>
+    <div style="font-size:11px;color:var(--muted);font-weight:700">NILAI END YEAR YANG DIBUTUHKAN (${esc(SIM.scope)})</div>
     <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${col}">${endNeeded>5||endNeeded<1?(endNeeded>5?'>5':'<1'):endNeeded.toFixed(2)}</div>
     <div style="font-size:12px;color:var(--muted);margin-top:4px">${note}</div>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ?×${ep}% = ${tgt.toFixed(2)}</div>
@@ -1383,14 +1502,14 @@ function runSimPredict(){
   const {wMid,wEnd,mp,ep}=_simWeights();
   SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.end=$('#sim-end').value;
   const mid=parseFloat(SIM.mid), end=parseFloat(SIM.end);
-  if(isNaN(mid)||isNaN(end)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Isi Mid & End Year dulu.</div>';return;}
+  if(isNaN(mid)||isNaN(end)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Mohon isi Mid Year dan End Year terlebih dahulu.</div>';return;}
   const final=mid*wMid+end*wEnd;
   const tgt=SIM.scope==='nasional'?targetNasional():targetPU(SIM.scope);
   const ok=tgt&&final>=tgt;
   SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
-    <div style="font-size:11px;color:var(--muted);font-weight:700">PREDIKSI NILAI FINAL (${esc(SIM.scope)})</div>
+    <div style="font-size:11px;color:var(--muted);font-weight:700">PREDIKSI NILAI AKHIR (${esc(SIM.scope)})</div>
     <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${tgt?(ok?'var(--green)':'var(--red)'):'var(--ink)'}">${final.toFixed(2)}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:4px">${tgt?(ok?'✓ Mencapai target '+tgt.toFixed(2):'✗ Di bawah target '+tgt.toFixed(2)):'(target belum diisi)'}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px">${tgt?(ok?'Mencapai target '+tgt.toFixed(2):'Berada di bawah target '+tgt.toFixed(2)):'(target belum diisi)'}</div>
     <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ${end.toFixed(2)}×${ep}% = ${final.toFixed(2)}</div>
   </div>`;
   $('#sim-result').innerHTML=SIM.lastResult;
@@ -1402,7 +1521,7 @@ function vsTarget(nilai,target){
   return `<span style="color:#F5B5AE">▼ ${d.toFixed(2)} di bawah target</span>`;
 }
 function barVsTarget(items){
-  if(!items.length)return '<p class="hint">Belum ada data.</p>';
+  if(!items.length)return '<p class="hint">Belum terdapat data.</p>';
   return items.map(it=>{
     const pct=Math.min(100,(it.nilai/5)*100);
     const tpct=it.target?Math.min(100,(it.target/5)*100):0;
@@ -1433,6 +1552,7 @@ function allFindings(){
       deskripsi:t['Deskripsi']||'', saran:t['Saran']||'', target:t['Target']||'',
       deskPerbaikan:t['Deskripsi Perbaikan']||'', tglPerbaikan:t['Tgl Perbaikan']||'',
       status:t['Status']||'Open', verifikator:t['Verifikator']||'',
+      penyebab:t['Penyebab']||'', berulang:t['Berulang']||'Tidak',
       pu:t['PU']||'', loc:t['Lokasi']||'', periode:t['Periode']||'', asesor:t['Asesor']||'',
       sessionId:t['ID Sesi']||'', 'Folder Foto':t['Folder Foto']||''
     }));
@@ -1446,29 +1566,29 @@ function allFindings(){
   return out;
 }
 async function loadDashCloud(){
-  if(!SYNC_URL){toast('Sync belum aktif');return;}
-  toast('Mengambil temuan dari Google…');
+  if(!SYNC_URL){toast('Sinkronisasi belum aktif');return;}
+  toast('Sedang mengambil temuan dari Google…');
   try{
     const res=await fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET));
     const out=await res.json();
     if(!out.ok){toast('Gagal: '+(out.error||'unknown'));return;}
     _dashCloudData=out.findings||[];
     renderDashboard();
-  }catch(e){toast('Gagal ambil (sinyal?): '+e.message);}
+  }catch(e){toast('Gagal mengambil data. Mohon periksa sinyal: '+e.message);}
 }
 async function updateFindingStatus(id,status){
-  if(getAuth().role!=='admin'){alert('Hanya admin yang bisa ubah status.');return;}
-  if(!SYNC_URL){alert('Sync belum aktif.');return;}
-  toast('Menyimpan status…');
+  if(getAuth().role!=='admin'){alert('Hanya administrator yang dapat mengubah status.');return;}
+  if(!SYNC_URL){alert('Sinkronisasi belum aktif.');return;}
+  toast('Sedang menyimpan status…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({secret:SYNC_SECRET,type:'updateStatus',findingId:id,status})});
+      body:JSON.stringify({secret:SYNC_SECRET,type:'updateStatus',findingId:id,status,verifikator:getAuth().name||'Admin'})});
     const out=await res.json();
     if(out.ok){
       (_dashCloudData||[]).forEach(t=>{if((t['ID Temuan']||t['id'])===id)t['Status']=status;});
-      alert('✓ Status temuan diubah ke "'+status+'" dan tersimpan ke Google.');renderDashboard();
-    }else alert('✗ GAGAL ubah status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('✗ GAGAL simpan (cek sinyal).\n\nDetail: '+e.message);}
+      alert('Status temuan telah diubah menjadi "'+status+'" dan tersimpan ke Google.');renderDashboard();
+    }else alert('GAGAL mengubah status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
 function _cloudFindingById(id){
   return (_dashCloudData||[]).find(t=>(t['ID Temuan']||t['id'])===id);
@@ -1476,32 +1596,55 @@ function _cloudFindingById(id){
 function openCloudFinding(id){
   const t=_cloudFindingById(id);if(!t)return;
   const katOpts=['Ringkas','Rapi','Resik','Rawat','Rajin'].map(k=>`<option ${k===(t['Kategori']||'')?'selected':''}>${k}</option>`).join('');
+  const penyebabOpts=['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya']
+    .map(p=>`<option value="${esc(p)}" ${p===(t['Penyebab']||'')?'selected':''}>${p===''?'— Pilih penyebab —':esc(p)}</option>`).join('');
   const folderUrl=t['Folder Foto']||'';
+  const berulangBadge=t['Berulang']==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px;margin-left:6px">TEMUAN BERULANG</span>`:'';
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <h3>Detail Temuan (Cloud)</h3>
+    <h3>Rincian Temuan (Cloud) ${berulangBadge}</h3>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${esc(t['PU']||'')} — ${esc(t['Lokasi']||'')} · ${esc(t['Periode']||'')} · ${esc(t['Asesor']||'')}</div>
     <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
-    <label class="field"><span class="lbl">Area Check</span><input class="input" id="cf-area" value="${esc(t['Area']||'')}"></label>
+    <label class="field"><span class="lbl">Area Pemeriksaan</span><input class="input" id="cf-area" value="${esc(t['Area']||'')}"></label>
     <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="cf-kat">${katOpts}</select></label>
     <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="cf-desk" style="min-height:60px">${esc(t['Deskripsi']||'')}</textarea></label>
-    ${folderUrl?`<a href="${esc(folderUrl)}" target="_blank" class="btn btn-ghost btn-block btn-sm" style="margin-bottom:10px">📷 Lihat Foto di Drive</a>`:'<p class="hint">Tidak ada folder foto.</p>'}
-    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · PERBAIKAN</div>
-    <label class="field"><span class="lbl">Saran Perbaikan</span><textarea class="input" id="cf-saran" style="min-height:50px">${esc(t['Saran']||'')}</textarea></label>
-    <label class="field"><span class="lbl">Target Perbaikan</span><input class="input" id="cf-target" value="${esc(t['Target']||'')}"></label>
-    <label class="field"><span class="lbl">Deskripsi Perbaikan</span><textarea class="input" id="cf-deskp" style="min-height:50px">${esc(t['Deskripsi Perbaikan']||'')}</textarea></label>
-    <label class="field"><span class="lbl">Tanggal Perbaikan</span><input class="input" id="cf-tglp" type="date" value="${esc((t['Tgl Perbaikan']||'').slice(0,10))}"></label>
+    ${folderUrl?`<a href="${esc(folderUrl)}" target="_blank" class="btn btn-ghost btn-block btn-sm" style="margin-bottom:10px">Lihat Foto pada Drive</a>`:'<p class="hint">Tidak terdapat folder foto.</p>'}
+    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · TINDAK LANJUT</div>
+    <label class="field"><span class="lbl">Penyebab (Root Cause)</span><select class="input" id="cf-penyebab">${penyebabOpts}</select></label>
+    <label class="field"><span class="lbl">Saran Tindak Lanjut</span><textarea class="input" id="cf-saran" style="min-height:50px">${esc(t['Saran']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" id="cf-target" value="${esc(t['Target']||'')}"></label>
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="cf-deskp" style="min-height:50px">${esc(t['Deskripsi Perbaikan']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="cf-tglp" type="date" value="${esc((t['Tgl Perbaikan']||'').slice(0,10))}"></label>
     <div style="font-size:11px;font-weight:800;color:var(--green-400);letter-spacing:.05em;margin:14px 0 8px">C · VERIFIKASI</div>
     <label class="field"><span class="lbl">Status</span><select class="input" id="cf-status">
       <option ${t['Status']==='Open'?'selected':''}>Open</option><option ${t['Status']==='Close'?'selected':''}>Close</option></select></label>
     <label class="field"><span class="lbl">Verifikator</span><input class="input" id="cf-verif" value="${esc(t['Verifikator']||'')}"></label>
+    <button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Lihat Riwayat Perubahan Status</button>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batal</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
       <button class="btn btn-primary" style="flex:1" onclick="saveCloudFinding('${esc(id)}')">Simpan ke Google</button>
     </div>
   </div></div>`;
 }
+async function lihatRiwayatStatus(findingId){
+  toast('Sedang mengambil riwayat status…');
+  try{
+    const res=await fetch(SYNC_URL+'?action=riwayatStatus&findingId='+encodeURIComponent(findingId)+'&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){toast('Gagal mengambil riwayat: '+(out.error||'tidak diketahui'));return;}
+    const riwayat=out.riwayat||[];
+    $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+      <h3>Riwayat Perubahan Status</h3>
+      <p class="hint">Jejak audit seluruh perubahan status pada temuan ini.</p>
+      ${riwayat.length?riwayat.map(r=>`<div class="list-row"><div class="nm">
+          <span style="color:var(--red)">${esc(r['Status Lama']||'—')}</span> → <span style="color:var(--green-400)">${esc(r['Status Baru']||'—')}</span>
+          <div style="font-size:11px;color:var(--muted);font-weight:400">${esc(r['Diubah Oleh']||'Tidak diketahui')} · ${r['Waktu Perubahan']?new Date(r['Waktu Perubahan']).toLocaleString('id-ID'):''}</div>
+        </div></div>`).join(''):'<div class="empty">Belum terdapat perubahan status yang tercatat.</div>'}
+      <button class="btn btn-ghost btn-block" style="margin-top:10px" onclick="openCloudFinding('${esc(findingId)}')">‹ Kembali ke Rincian Temuan</button>
+    </div></div>`;
+  }catch(e){ toast('Gagal mengambil riwayat (periksa sinyal): '+e.message); }
+}
 async function saveCloudFinding(id){
-  if(getAuth().role!=='admin'){toast('Hanya admin');return;}
+  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
   const payload={
     secret:SYNC_SECRET,type:'updateFinding',findingId:id,
     fields:{
@@ -1512,7 +1655,7 @@ async function saveCloudFinding(id){
       Verifikator:$('#cf-verif').value
     }
   };
-  toast('Menyimpan ke Google…');
+  toast('Sedang menyimpan ke Google…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify(payload)});
@@ -1521,9 +1664,9 @@ async function saveCloudFinding(id){
       // update cache lokal
       const t=_cloudFindingById(id);
       if(t)Object.keys(payload.fields).forEach(k=>{t[k]=payload.fields[k];});
-      closeModal();alert('✓ Temuan berhasil disimpan ke Google.');renderDashboard();
-    }else alert('✗ GAGAL simpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('✗ GAGAL simpan (cek sinyal).\n\nDetail: '+e.message);}
+      closeModal();alert('Temuan berhasil disimpan ke Google.');renderDashboard();
+    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
 function renderDashboard(){
   const auth=getAuth();
@@ -1546,40 +1689,50 @@ function renderDashboard(){
   const byAsesor={};F.forEach(x=>{byAsesor[x.asesor]=byAsesor[x.asesor]||{t:0,o:0,c:0};byAsesor[x.asesor].t++;x.status==='Open'?byAsesor[x.asesor].o++:byAsesor[x.asesor].c++;});
   // per kategori 5R
   const by5R={};['Ringkas','Rapi','Resik','Rawat','Rajin'].forEach(k=>by5R[k]=0);F.forEach(x=>{if(by5R[x.kategori]!=null)by5R[x.kategori]++;});
+  // per penyebab (root cause) — hanya yang telah diisi
+  const byPenyebab={};F.forEach(x=>{if(x.penyebab){byPenyebab[x.penyebab]=(byPenyebab[x.penyebab]||0)+1;}});
+  const jumlahBerulang=F.filter(x=>x.berulang==='Ya').length;
 
   app().innerHTML=topbar('Dashboard Temuan','Analisis 5R')+`
   <div class="wrap">
     ${auth.role==='admin'&&SYNC_URL?`<div class="card" style="padding:10px">
       <div class="seg" style="background:var(--concrete);margin:0">
-        <button class="${DASH_SRC==='local'?'on':''}" style="color:${DASH_SRC==='local'?'#fff':'var(--muted)'};background:${DASH_SRC==='local'?'var(--green)':'transparent'}" onclick="DASH_SRC='local';renderDashboard()">📱 Perangkat Ini</button>
-        <button class="${DASH_SRC==='cloud'?'on':''}" style="color:${DASH_SRC==='cloud'?'#fff':'var(--muted)'};background:${DASH_SRC==='cloud'?'var(--green)':'transparent'}" onclick="DASH_SRC='cloud';${_dashCloudData?'renderDashboard()':'loadDashCloud()'}">☁ Semua Asesor (Cloud)</button>
+        <button class="${DASH_SRC==='local'?'on':''}" style="color:${DASH_SRC==='local'?'#fff':'var(--muted)'};background:${DASH_SRC==='local'?'var(--green)':'transparent'}" onclick="DASH_SRC='local';renderDashboard()">Perangkat Ini</button>
+        <button class="${DASH_SRC==='cloud'?'on':''}" style="color:${DASH_SRC==='cloud'?'#fff':'var(--muted)'};background:${DASH_SRC==='cloud'?'var(--green)':'transparent'}" onclick="DASH_SRC='cloud';${_dashCloudData?'renderDashboard()':'loadDashCloud()'}">☁ Seluruh Asesor (Cloud)</button>
       </div>
     </div>`:''}
     <div class="card">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <select class="input" style="flex:1;min-width:110px" onchange="dashFilter.pu=this.value;renderDashboard()">
-          <option value="">Semua PU</option>${pus.map(p=>`<option ${p===dashFilter.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+          <option value="">Seluruh PU</option>${pus.map(p=>`<option ${p===dashFilter.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
         <select class="input" style="flex:1;min-width:110px" onchange="dashFilter.periode=this.value;renderDashboard()">
-          <option value="">Semua Periode</option>${periodes.map(p=>`<option ${p===dashFilter.periode?'selected':''}>${esc(p)}</option>`).join('')}</select>
+          <option value="">Seluruh Periode</option>${periodes.map(p=>`<option ${p===dashFilter.periode?'selected':''}>${esc(p)}</option>`).join('')}</select>
         <select class="input" style="flex:1;min-width:100px" onchange="dashFilter.status=this.value;renderDashboard()">
-          <option value="">Semua Status</option><option ${dashFilter.status==='Open'?'selected':''}>Open</option><option ${dashFilter.status==='Close'?'selected':''}>Close</option></select>
+          <option value="">Seluruh Status</option><option ${dashFilter.status==='Open'?'selected':''}>Open</option><option ${dashFilter.status==='Close'?'selected':''}>Close</option></select>
       </div>
     </div>
 
-    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum ada data temuan.<br>'+(DASH_SRC==='cloud'?'Belum ada temuan ter-sync.':'Selesaikan assessment dulu.')+'</div>':`
+    ${total===0?'<div class="empty"><div class="ic">📊</div>Belum terdapat data temuan.<br>'+(DASH_SRC==='cloud'?'Belum terdapat temuan yang tersinkron.':'Mohon selesaikan penilaian terlebih dahulu.')+'</div>':`
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green)">${total}</div>
         <div style="font-size:11px;color:var(--muted);font-weight:700">TEMUAN</div></div>
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--red)">${open}</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">OPEN</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">TERBUKA</div></div>
       <div class="card" style="flex:1;text-align:center;margin:0;padding:16px">
         <div style="font-family:Archivo;font-weight:800;font-size:28px;color:var(--green-400)">${pctClose}%</div>
-        <div style="font-size:11px;color:var(--muted);font-weight:700">CLOSE</div></div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700">SELESAI</div></div>
     </div>
 
-    <div class="card"><h2>Status Open vs Close</h2>${donutSVG(close,open)}</div>
+    ${jumlahBerulang>0?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <span style="font-size:18px">⚠️</span>
+        <div><div style="font-weight:800;font-size:13px;margin-bottom:2px">${jumlahBerulang} Temuan Berulang</div>
+        <div style="font-size:12px;color:var(--muted)">Kombinasi area dan kategori yang sama telah tercatat pada periode sebelumnya di lokasi yang sama — mengindikasikan perbaikan belum efektif.</div></div>
+      </div></div>`:''}
+
+    <div class="card"><h2>Status Terbuka terhadap Selesai</h2>${donutSVG(close,open)}</div>
 
     <div class="card"><h2>Temuan per Kategori 5R</h2>${barChart(by5R)}</div>
 
@@ -1589,28 +1742,33 @@ function renderDashboard(){
     <div class="card"><h2>Per Area / Zona</h2>
       ${dashTable(byArea,['Area','Temuan','Open','Close','% Close'])}</div>
 
-    <div class="card"><h2>Per Assessor</h2>
+    <div class="card"><h2>Per Asesor</h2>
       ${dashTable(byAsesor,['Assessor','Temuan','Open','Close','% Close'])}</div>
 
+    ${Object.keys(byPenyebab).length?`<div class="card"><h2>Penyebab Utama (Root Cause)</h2>
+      <p class="hint">Kategori penyebab yang dicatat asesor saat melengkapi temuan — membantu tindak lanjut yang mencegah temuan berulang, bukan sekadar perbaikan sesaat.</p>
+      ${barChart(byPenyebab)}</div>`:''}
+
     ${DASH_SRC==='cloud'&&auth.role==='admin'?`<div class="card"><h2>Kelola Status Temuan</h2>
-      <p class="hint">Tap temuan untuk lihat & edit detail. Hanya admin (satu pintu). Perubahan tersimpan ke Google.</p>
+      <p class="hint">Ketuk salah satu temuan untuk melihat dan mengubah rincian. Hanya dapat dilakukan oleh administrator. Perubahan tersimpan ke Google.</p>
       ${F.map(x=>{const stc=x.status==='Close'?'var(--green-400)':'var(--red)';
         return `<div class="card" style="padding:13px;margin-bottom:8px;cursor:pointer" onclick="openCloudFinding('${esc(x.id)}')">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
           <span class="tag5r t-${x.kategori}">${(x.kategori||'').toUpperCase()}</span>
+          ${x.berulang==='Ya'?'<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px">BERULANG</span>':''}
           <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(x.status)}</span>
         </div>
         <div style="font-weight:700;font-size:13px">${esc(x.pu)} — ${esc(x.loc)}</div>
         <div style="font-size:12px;color:var(--ink);font-weight:600">${esc(x.area||'')}</div>
         <div style="font-size:12px;color:var(--muted)">${esc((x.deskripsi||'').slice(0,90))}${(x.deskripsi||'').length>90?'…':''}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-          <span style="font-size:11px;color:var(--green);font-weight:700">Tap untuk detail ›</span>
-          ${x['Folder Foto']?'<span style="font-size:11px;color:var(--amber);font-weight:700">📷 ada foto</span>':''}
+          <span style="font-size:11px;color:var(--green);font-weight:700">Ketuk untuk rincian ›</span>
+          ${x['Folder Foto']?'<span style="font-size:11px;color:var(--amber);font-weight:700">📷 terdapat foto</span>':''}
         </div>
       </div>`;}).join('')}
     </div>`:''}
 
-    <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">⬇ Unduh Rekap (CSV)</button>${DASH_SRC==='cloud'?'<button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="loadDashCloud()">↻ Refresh dari Google</button>':''}</div>
+    <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">Unduh Rekapitulasi (CSV)</button>${DASH_SRC==='cloud'?'<button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="loadDashCloud()">Perbarui dari Google</button>':''}</div>
     `}
   </div>
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
@@ -1653,13 +1811,13 @@ function exportDashCSV(){
   if(dashFilter.pu)F=F.filter(x=>x.pu===dashFilter.pu);
   if(dashFilter.periode)F=F.filter(x=>x.periode===dashFilter.periode);
   if(dashFilter.status)F=F.filter(x=>x.status===dashFilter.status);
-  const head=['PU','Lokasi','Periode','Assessor','Area Check','Kategori','Deskripsi Temuan','Saran Perbaikan','Target','Deskripsi Perbaikan','Tgl Perbaikan','Status','Verifikator'];
+  const head=['PU','Lokasi','Periode','Assessor','Area Pemeriksaan','Kategori','Deskripsi Temuan','Saran Tindak Lanjut','Target','Deskripsi Tindak Lanjut','Tgl Perbaikan','Status','Verifikator'];
   const rows=[head];
   F.forEach(x=>rows.push([x.pu,x.loc,x.periode,x.asesor,x.area,x.kategori,x.deskripsi,x.saran,x.target,x.deskPerbaikan,x.tglPerbaikan,x.status,x.verifikator]));
   const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='Rekap_Temuan_5R.csv';a.click();
-  toast('Rekap diunduh');
+  toast('Rekapitulasi telah diunduh');
 }
 
 window.addEventListener('beforeunload',function(e){
