@@ -531,7 +531,7 @@ function renderHome(){
     <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
       <span style="font-size:22px">⚠️</span>
       <div><div style="font-weight:800;font-size:15px;color:#9A6B00;margin-bottom:4px">Ada Perubahan Formulir Belum Disinkronkan</div>
-      <div style="font-size:13px;color:var(--muted)">Anda mengubah area/klausul/target/foto standar, tetapi BELUM mengirimkannya ke seluruh asesor. Selama belum disinkronkan, asesor masih menggunakan formulir versi lama (v${STORE.config.version||1}).</div></div>
+      <div style="font-size:13px;color:var(--muted)">Anda mengubah Area Pemeriksaan, klausul, Formulir per Lokasi, atau Target Nilai, tetapi BELUM mengirimkannya ke seluruh asesor. Selama belum disinkronkan, asesor masih menggunakan formulir versi lama (v${STORE.config.version||1}). <span style="font-weight:700">(Catatan: perubahan pada Foto Standar/Galeri sudah otomatis tersinkron secara langsung dan tidak memerlukan langkah ini.)</span></div></div>
     </div>
     <button class="btn btn-amber btn-block" onclick="pushConfig()">Sinkronkan Sekarang ke Seluruh Asesor</button>
   </div>`:'';
