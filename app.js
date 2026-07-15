@@ -7,13 +7,14 @@ const LS_KEY='asesmen5r_v1';
 const AUTH_KEY='asesmen5r_auth';
 // Admin password (Fase 1: disimpan di kode; ganti sesuai kebutuhan)
 const ADMIN_PASS='admin5r';
-const ASESOR_PASS='asesor';
+// (P-uid) ASESOR_PASS DIHAPUS — asesor sekarang login dengan akun individual
+// (username + password sendiri, diverifikasi ke server). Lihat _loginUser di code.gs.
 
 /* ===== FASE 2: Sync ke Google (Apps Script) =====
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbxGrxZH9wi05uOgvdR7ckQ0qqKV9SkyREAyftq83ISEtoQ8O4Pp_5NYI6WnzN_tXCZRXg/exec';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
@@ -51,9 +52,9 @@ function saveStore(){try{localStorage.setItem(LS_KEY,JSON.stringify(STORE));}cat
 let STORE=loadStore();
 
 /* ---------- Auth ---------- */
-function getAuth(){try{return JSON.parse(sessionStorage.getItem(AUTH_KEY))||null;}catch(e){return null;}}
-function setAuth(a){sessionStorage.setItem(AUTH_KEY,JSON.stringify(a));}
-function logout(){sessionStorage.removeItem(AUTH_KEY);DRAFT=null;render();}
+function getAuth(){try{return JSON.parse(localStorage.getItem(AUTH_KEY))||null;}catch(e){return null;}}
+function setAuth(a){localStorage.setItem(AUTH_KEY,JSON.stringify(a));}
+function logout(){localStorage.removeItem(AUTH_KEY);DRAFT=null;render();}
 
 /* ---------- App state ---------- */
 let VIEW='home';          // home | assess | report | admin
@@ -71,6 +72,8 @@ function gradeFor(score){
   return score>=5?STORE.config.grading[STORE.config.grading.length-1]:STORE.config.grading[0];
 }
 const ASPECTS=['Ringkas','Rapi','Resik','Rawat'];
+/* [P10] Label tampilan Jenis — value internal tetap 'Resmi'/'Internal' agar konsisten dengan data lama */
+function jenisLabel(j){return j==='Resmi'?'Asesmen Direktorat Operasi':(j||'');}
 
 /* ---------- Scoring ----------
    Item biasa: per aspek 3 kriteria Ya/Tidak -> jumlah Ya: 3->4,2->3,1->2,0->1
@@ -138,6 +141,34 @@ function handlePhoto(file,cb){
   };
   reader.readAsDataURL(file);
 }
+/* (P-concern3) Kompresi lebih agresif KHUSUS foto standar/acuan — foto ini disebar ke
+   SEMUA asesor lewat STORE.config (bukan cuma tersimpan lokal 1 device seperti foto
+   assessment), jadi ukurannya perlu ditekan lebih jauh (400px, kualitas rendah) supaya
+   tidak ikut menggerus kuota localStorage 5MB milik setiap asesor. */
+function handlePhotoStandar(file,cb){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const max=400;let{width:w,height:h}=img;
+      if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      const url=cv.toDataURL('image/jpeg',0.35);
+      cb(url);
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+/* Perkirakan ukuran total fotoStandar (bytes) — ditampilkan ke admin di tab Foto Standar
+   supaya sadar berapa besar kontribusinya ke kuota localStorage seluruh asesor. */
+function fotoStandarUsage(){
+  const fs=STORE.config.fotoStandar||{};
+  let bytes=0;
+  Object.keys(fs).forEach(areaId=>Object.keys(fs[areaId]).forEach(asp=>{bytes+=(fs[areaId][asp]||'').length;}));
+  return bytes;
+}
 /* perkiraan sisa storage: localStorage limit ~5MB. Cek pemakaian sekarang. */
 function storageUsage(){
   let bytes=0;try{for(const k in localStorage){if(localStorage.hasOwnProperty(k))bytes+=(localStorage[k].length+k.length)*2;}}catch(e){}
@@ -148,25 +179,53 @@ function storageOK(){return storageUsage()<4.3*1024*1024;} // sisakan buffer dar
 /* main render dispatch defined in app2.js */
 window.addEventListener('DOMContentLoaded',()=>{render();checkRemoteConfig();});
 
-/* ===== FITUR 3: tarik config terbaru dari Google (kalau online) ===== */
+/* ===== FITUR 3: tarik config terbaru dari Google (kalau online) =====
+   (P-syncstatus) Status sync formulir disimpan global (SYNC_STATUS) supaya bisa
+   ditampilkan sebagai indikator jelas di Home — bukan cuma toast sekilas yang
+   gampang kelewatan. Status: 'checking' | 'synced' | 'failed' | 'disabled'.
+   Kalau gagal, asesor WAJIB coba lagi sebelum bisa memulai assessment baru
+   (lihat startAssess()), supaya tidak diam-diam pakai formulir/target yang basi.
+   PENTING: selalu pakai render() (bukan renderHome() langsung) dan cek getAuth()
+   dulu — checkRemoteConfig() bisa terpanggil dari DOMContentLoaded SEBELUM user
+   login, saat VIEW masih default 'home' tapi belum ada sesi auth sama sekali. */
+let SYNC_STATUS={state:'checking',lastCheckedAt:null,version:null,error:null};
+function _refreshHomeIfNeeded(){
+  if(VIEW==='home'&&getAuth())render(); // hanya re-render kalau memang sudah login & lagi di Home
+}
 async function checkRemoteConfig(){
-  if(!SYNC_URL)return; // offline mode / belum setup
+  if(!SYNC_URL){SYNC_STATUS={state:'disabled',lastCheckedAt:new Date().toISOString(),version:STORE.config.version||1,error:null};_refreshHomeIfNeeded();return;}
+  SYNC_STATUS.state='checking';
+  _refreshHomeIfNeeded();
   // JANGAN timpa kalau admin punya editan lokal yang belum di-sync
-  if(STORE.config&&STORE.config._dirty)return;
+  if(STORE.config&&STORE.config._dirty){
+    SYNC_STATUS={state:'synced',lastCheckedAt:new Date().toISOString(),version:STORE.config.version||1,error:null,localDirty:true};
+    _refreshHomeIfNeeded();
+    return;
+  }
   try{
     const res=await fetch(SYNC_URL+'?action=config');
     const out=await res.json();
-    if(!out.ok||!out.config)return; // belum ada config master di Google
+    if(!out.ok||!out.config){
+      // belum ada config master di Google sama sekali — bukan kegagalan, cuma belum pernah di-push
+      SYNC_STATUS={state:'synced',lastCheckedAt:new Date().toISOString(),version:STORE.config.version||1,error:null};
+      _refreshHomeIfNeeded();
+      return;
+    }
     const remoteVer=out.config.version||0;
     const localVer=(STORE.config&&STORE.config.version)||0;
     if(remoteVer>localVer){
       STORE.config=out.config;
       saveStore();
       toast('📋 Form audit diperbarui ke versi '+remoteVer);
-      if(VIEW==='home'||VIEW==='admin')render();
     }
-  }catch(e){/* offline / gagal: diam saja, pakai config lokal */}
+    SYNC_STATUS={state:'synced',lastCheckedAt:new Date().toISOString(),version:STORE.config.version||1,error:null};
+    _refreshHomeIfNeeded();
+  }catch(e){
+    SYNC_STATUS={state:'failed',lastCheckedAt:new Date().toISOString(),version:STORE.config.version||1,error:e.message};
+    _refreshHomeIfNeeded();
+  }
 }
+function retrySyncConfig(){checkRemoteConfig();}
 
 /* ================= RENDER ================= */
 function render(){
@@ -178,6 +237,7 @@ function render(){
   if(VIEW==='findings'&&DRAFT){renderFindings();return;}
   if(VIEW==='dashboard'){renderDashboard();return;}
   if(VIEW==='dashnilai'){renderDashNilai();return;}
+  if(VIEW==='temuansaya'&&auth.role==='asesor'){renderTemuanSaya();return;}
   renderHome();
 }
 
@@ -195,32 +255,60 @@ function renderLogin(){
     </div>
     <div id="login-err"></div>
     ${loginRole==='asesor'?`
-      <label class="field"><span class="lbl">Nama Asesor</span>
-        <input class="input" id="li-name" placeholder="Nama Lengkap" autocomplete="name"></label>
-      <label class="field"><span class="lbl">Kata Sandi Asesor</span>
-        <input class="input" id="li-pass" type="password" placeholder="••••••" inputmode="text"></label>
+      <label class="field"><span class="lbl">Username</span>
+        <input class="input" id="li-user" placeholder="Username" autocomplete="username"></label>
+      <label class="field"><span class="lbl">Kata Sandi</span>
+        <input class="input" id="li-pass" type="password" placeholder="••••••" autocomplete="current-password"></label>
+      <p class="hint" style="color:rgba(255,255,255,.55);margin-top:-8px">Belum punya akun? Hubungi admin untuk didaftarkan.</p>
     `:`
       <label class="field"><span class="lbl">Kata Sandi Administrator</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••"></label>
     `}
-    <button class="btn btn-amber btn-block" style="margin-top:6px" onclick="doLogin()">Masuk</button>
+    <button class="btn btn-amber btn-block" style="margin-top:6px" id="li-submit" onclick="doLogin()">Masuk</button>
     <div class="login-footer">
       <span class="cap">Dipersembahkan oleh</span>
       <img src="${LOGO_PL}" alt="Pertamina Lubricants" class="login-pl">
     </div>
   </div>`;
 }
-function doLogin(){
+/* (P-uid) Hash SHA-256 memakai Web Crypto API bawaan browser — tidak perlu library
+   tambahan. Password ASLI tidak pernah dikirim ke jaringan/disimpan di mana pun;
+   yang dikirim dan dibandingkan hanya hash-nya. */
+async function sha256Hex(text){
+  const enc=new TextEncoder().encode(text);
+  const buf=await crypto.subtle.digest('SHA-256',enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function doLogin(){
   const pass=($('#li-pass')||{}).value||'';
   const err=$('#login-err');
   if(loginRole==='admin'){
     if(pass!==ADMIN_PASS){err.innerHTML='<div class="login-err">Kata Sandi Administrator salah.</div>';return;}
-    setAuth({role:'admin',name:'Admin'});VIEW='home';render();
-  }else{
-    const name=($('#li-name')||{}).value.trim();
-    if(!name){err.innerHTML='<div class="login-err">Nama asesor wajib diisi.</div>';return;}
-    if(pass!==ASESOR_PASS){err.innerHTML='<div class="login-err">Kata Sandi Asesor salah.</div>';return;}
-    setAuth({role:'asesor',name});VIEW='home';render();
+    setAuth({role:'admin',name:'Admin'});VIEW='home';render();checkRemoteConfig();
+    return;
+  }
+  // (P-uid) Login asesor: verifikasi username+password ke server (wajib online sekali di awal)
+  const username=($('#li-user')||{}).value.trim();
+  if(!username){err.innerHTML='<div class="login-err">Username wajib diisi.</div>';return;}
+  if(!pass){err.innerHTML='<div class="login-err">Kata sandi wajib diisi.</div>';return;}
+  if(!SYNC_URL){err.innerHTML='<div class="login-err">Sinkronisasi belum diaktifkan pada aplikasi ini — login asesor memerlukan koneksi ke server.</div>';return;}
+  const btn=$('#li-submit');if(btn){btn.disabled=true;btn.textContent='Memeriksa…';}
+  err.innerHTML='';
+  try{
+    const passwordHash=await sha256Hex(pass);
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'login',username,passwordHash})});
+    const out=await res.json();
+    if(out.ok){
+      setAuth({role:'asesor',name:out.namaLengkap||username,username});
+      VIEW='home';render();checkRemoteConfig();
+    }else{
+      err.innerHTML='<div class="login-err">'+esc(out.error||'Login gagal.')+'</div>';
+      if(btn){btn.disabled=false;btn.textContent='Masuk';}
+    }
+  }catch(e){
+    err.innerHTML='<div class="login-err">Gagal terhubung ke server. Periksa koneksi internet Anda dan coba lagi.</div>';
+    if(btn){btn.disabled=false;btn.textContent='Masuk';}
   }
 }
 
@@ -250,6 +338,7 @@ function openDrawer(){
       <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>`:''}
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
+      ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya (Tindak Lanjut)</button>`:''}
       ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulirulir & Butir Audit</button>`:''}
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
@@ -285,26 +374,71 @@ function renderHome(){
         <button class="btn btn-amber" style="flex:1" onclick="resumeDraft()">Lanjutkan</button>
         <button class="btn btn-ghost btn-sm" onclick="discardDraft()">Batalkan</button>
       </div></div>`:'';
+
+  // (P-syncstatus) Indikator status sync formulir — beda tampilan asesor vs admin
+  const jamCek=SYNC_STATUS.lastCheckedAt?new Date(SYNC_STATUS.lastCheckedAt).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}):'—';
+  let syncBanner='';
+  if(SYNC_STATUS.state==='checking'){
+    syncBanner=`<div class="card" style="background:#F4F8F5;display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">⏳</span><div style="font-size:13px;color:var(--muted)">Memeriksa pembaruan formulir dari Google…</div></div>`;
+  }else if(SYNC_STATUS.state==='failed'){
+    syncBanner=`<div class="card" style="background:#FBEEEC;border-color:#E6B0AA">
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+        <span style="font-size:20px">⚠️</span>
+        <div><div style="font-weight:800;font-size:14px;color:var(--red);margin-bottom:4px">Gagal Memuat Pembaruan Formulir</div>
+        <div style="font-size:12px;color:var(--muted)">Aplikasi tidak berhasil memeriksa versi formulir terbaru dari Google (kemungkinan tidak ada sinyal internet). Untuk memastikan Anda menilai dengan klausul dan target yang benar, mohon:<br>
+        1) Periksa koneksi internet perangkat Anda.<br>
+        2) Ketuk tombol "Coba Sinkron Ulang" di bawah.<br>
+        3) Jika masih gagal, hubungi admin sebelum melanjutkan penilaian baru.</div></div>
+      </div>
+      <button class="btn btn-primary btn-block btn-sm" onclick="retrySyncConfig()">🔄 Coba Sinkron Ulang</button>
+    </div>`;
+  }else if(SYNC_STATUS.state==='disabled'){
+    syncBanner=`<div class="card" style="background:var(--concrete)"><div style="font-size:12px;color:var(--muted)">Mode luring — sinkronisasi formulir belum diaktifkan pada aplikasi ini.</div></div>`;
+  }else{
+    syncBanner=`<div class="card" style="padding:10px 14px;display:flex;align-items:center;gap:8px">
+      <span style="color:var(--lime);font-weight:800">✓</span>
+      <div style="font-size:12px;color:var(--muted)">Formulir terbaru (v${STORE.config.version||1}) · terakhir diperiksa ${jamCek}</div>
+    </div>`;
+  }
+
+  // (P-syncstatus) Banner besar khusus admin: ada perubahan formulir yang BELUM di-push ke asesor
+  const adminDirtyBanner=(auth.role==='admin'&&STORE.config&&STORE.config._dirty)?`<div class="card" style="background:#FEF9EC;border:2px solid var(--amber)">
+    <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+      <span style="font-size:22px">⚠️</span>
+      <div><div style="font-weight:800;font-size:15px;color:#9A6B00;margin-bottom:4px">Ada Perubahan Formulir Belum Disinkronkan</div>
+      <div style="font-size:13px;color:var(--muted)">Anda mengubah area/klausul/target/foto standar, tetapi BELUM mengirimkannya ke seluruh asesor. Selama belum disinkronkan, asesor masih menggunakan formulir versi lama (v${STORE.config.version||1}).</div></div>
+    </div>
+    <button class="btn btn-amber btn-block" onclick="pushConfig()">Sinkronkan Sekarang ke Seluruh Asesor</button>
+  </div>`:'';
+
+  // (P-syncstatus) Asesor WAJIB berhasil sync sebelum bisa memulai assessment baru
+  const blokirMulai=(auth.role==='asesor'&&SYNC_STATUS.state==='failed');
+
   app().innerHTML=topbar('Assesment 5R','Selamat datang, '+auth.name)+`
   <div class="wrap">
+    ${adminDirtyBanner}
+    ${syncBanner}
     ${resumeHtml}
     <div class="card">
       <h2>Mulai Penilaian</h2>
       <p class="hint">Pilih periode, tahun, jenis penilaian, Production Unit, dan lokasi yang akan dinilai.</p>
-      <label class="field"><span class="lbl">Periode</span>
-        <select class="input" id="h-periode">
-          <option value="Mid Year">Mid Year ${new Date().getFullYear()}</option>
-          <option value="End Year">End Year ${new Date().getFullYear()}</option>
-        </select></label>
-      <div style="display:flex;gap:10px">
+      ${blokirMulai?`<div class="login-err" style="background:var(--red);margin-bottom:14px">Penilaian baru dikunci sampai formulir berhasil disinkronkan. Lihat peringatan di atas.</div>`:''}
+      <div style="display:flex;gap:10px;${blokirMulai?'opacity:.4;pointer-events:none':''}">
         <label class="field" style="flex:1"><span class="lbl">Tahun</span>
-          <select class="input" id="h-tahun">${tahunOptions()}</select></label>
+          <select class="input" id="h-tahun" onchange="updatePeriodeLabel(this.value)">${tahunOptions()}</select></label>
         <label class="field" style="flex:1"><span class="lbl">Jenis</span>
           <select class="input" id="h-jenis">
-            <option value="Resmi">Resmi</option>
+            <option value="Resmi">Asesmen Direktorat Operasi</option>
             <option value="Internal">Internal</option>
           </select></label>
       </div>
+      <div style="${blokirMulai?'opacity:.4;pointer-events:none':''}">
+      <label class="field"><span class="lbl">Periode</span>
+        <select class="input" id="h-periode">
+          <option value="Mid Year" id="h-periode-mid">Mid Year ${new Date().getFullYear()}</option>
+          <option value="End Year" id="h-periode-end">End Year ${new Date().getFullYear()}</option>
+        </select></label>
       <label class="field"><span class="lbl">Production Unit</span>
         <select class="input" id="h-pu" onchange="homePU=this.value;renderHome()">
           ${pus.map(p=>`<option ${p===homePU?'selected':''}>${esc(p)}</option>`).join('')}
@@ -313,7 +447,8 @@ function renderHome(){
         <select class="input" id="h-loc">
           ${locs.map(l=>`<option>${esc(l)}</option>`).join('')}
         </select></label>
-      <button class="btn btn-primary btn-block" onclick="startAssess()">Mulai →</button>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="startAssess()" ${blokirMulai?'disabled style="opacity:.4"':''}>Mulai →</button>
     </div>
 
     ${STORE.sessions.length?`<div class="card">
@@ -323,7 +458,7 @@ function renderHome(){
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
           <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
-          <div class="st">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(s.jenis):''} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
+          <div class="st">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <span class="chev">›</span></div>`;
       }).join('')}
@@ -335,6 +470,12 @@ function renderHome(){
   </div>`;
 }
 
+/* [P11] label opsi Periode mengikuti tahun yang dipilih di field Tahun (bukan hardcode tahun berjalan) */
+function updatePeriodeLabel(tahun){
+  const mid=$('#h-periode-mid'),end=$('#h-periode-end');
+  if(mid)mid.textContent='Mid Year '+tahun;
+  if(end)end.textContent='End Year '+tahun;
+}
 function clearMyData(){
   const unsynced=STORE.sessions.filter(s=>!s.synced).length;
   if(unsynced>0){
@@ -351,19 +492,24 @@ function clearMyData(){
 }
 
 function startAssess(){
+  const auth=getAuth();
+  if(auth.role==='asesor'&&SYNC_STATUS.state==='failed'){
+    toast('⛔ Penilaian baru dikunci — formulir belum berhasil disinkronkan. Coba sinkron ulang dari Beranda.');
+    return;
+  }
   const pu=$('#h-pu').value, loc=$('#h-loc').value, periode=$('#h-periode').value;
   const tahun=parseInt(($('#h-tahun')||{}).value,10)||new Date().getFullYear();  // [MT]
   const jenis=($('#h-jenis')||{}).value||'Resmi';                                // [MT]
   // ANTI-DOUBLE: 1 PU+Lokasi+Periode+Tahun+Jenis cuma boleh sekali (cek data di HP ini) [MT]
   const dup=STORE.sessions.find(s=>s.pu===pu&&s.loc===loc&&(s.periode||'')===(periode||'')&&(s.tahun||'')===tahun&&(s.jenis||'Resmi')===jenis);
   if(dup){
-    toast(`⛔ ${loc} (${pu}) ${periode} ${tahun} [${jenis}] sudah dinilai. Tidak boleh dobel.`);
+    toast(`⛔ ${loc} (${pu}) ${periode} ${tahun} [${jenisLabel(jenis)}] sudah dinilai. Tidak boleh dobel.`);
     return;
   }
   const areas=(STORE.config.matrix[pu]||{})[loc]||[];
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
-  DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
+  DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,asesorUsername:getAuth().username||'',date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
     areas:areaIds,answers:{},interviewVals:{},photos:{},notes:{},curArea:0};
   VIEW='assess';render();
 }
@@ -425,11 +571,16 @@ function renderAssessBody(){
       <p class="hint">Dilaksanakan pada tahap awal. Berikan nilai 1 (paling rendah) sampai 5 (paling baik) sesuai kondisi sebenarnya.</p></div>`
       + STORE.config.interview.map((it,idx)=>{
         const val=d.interviewVals[idx]||0;
-        const desc=val?it.rubrik[val-1]:'';
         return `<div class="card">
           <div class="aspect-head"><span class="tag5r t-Rajin">RAJIN</span> ${esc(it.area)} — ${esc(it.aspek)}</div>
+          <p class="hint" style="margin-bottom:10px">Acuan penilaian — pilih nilai yang paling sesuai dengan kondisi di lapangan:</p>
+          <div style="margin-bottom:12px">
+            ${it.rubrik.map((r,i)=>`<div style="display:flex;gap:8px;padding:7px 0;${i<it.rubrik.length-1?'border-bottom:1px solid var(--line)':''};${val===i+1?'background:#EAF5EC;border-radius:8px;padding-left:8px;padding-right:8px':''}">
+              <span style="font-family:Archivo;font-weight:800;color:${val===i+1?'var(--green)':'var(--muted)'};flex-shrink:0;width:16px">${i+1}</span>
+              <span style="font-size:12.5px;color:${val===i+1?'var(--ink)':'var(--muted)'}">${esc(r)}</span>
+            </div>`).join('')}
+          </div>
           <div class="scale">${[1,2,3,4,5].map(n=>`<button class="${val===n?'on':''}" onclick="setInterview(${idx},${n})">${n}</button>`).join('')}</div>
-          <div class="scale-desc" id="idesc-${idx}">${esc(desc)}</div>
         </div>`;
       }).join('')
       + (d.areas.length===0?`<div class="card"><h2>Belum Terdapat Area Penilaian</h2>
@@ -456,6 +607,12 @@ function renderAssessBody(){
     html+=`<div class="aspect"><div class="aspect-head">
       <span class="tag5r t-${asp}">${asp.toUpperCase()}</span>
       <span class="aspect-score">${anyAns?'Nilai '+aspectScore(yes):''}</span></div>`;
+    // (P4) foto standar/acuan — ditampilkan sebelum klausul aspek ini sebagai panduan asesor
+    const fotoAcuan=fotoStandarFor(areaId,asp);
+    if(fotoAcuan){
+      html+=`<div style="margin-bottom:10px"><img src="${fotoAcuan}" style="width:100%;max-width:220px;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">
+        <div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:4px">📷 Foto Acuan/Standar — ${asp}</div></div>`;
+    }
     krit.forEach((q,i)=>{
       const key=`${areaId}|${asp}|${i}`;const v=d.answers[key];
       html+=`<div class="crit"><div class="q">${esc(q)}</div>
@@ -464,16 +621,23 @@ function renderAssessBody(){
           <button class="tidak ${v==='tidak'?'on':''}" onclick="setAns('${key}','tidak')"><span class="ic">✕</span>Tidak</button>
         </div></div>`;
     });
-    // photo + note PER ASPEK
+    // photo (WAJIB min 1) + temuan (WAJIB jika ada klausul "tidak") — dipisah, blok masing-masing (P2)
     const akey=`${areaId}|${asp}`;
     const photos=d.photos[akey]||[];
-    html+=`<div class="finding">
-      <div class="finding-lbl">Temuan dan Dokumentasi Foto — ${asp} <span style="color:var(--muted);font-weight:400">(${photos.length}/5)</span></div>
+    const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
+    const notePenuh=(d.notes[akey]||'').trim().length>0;
+    const fotoKurang=photos.length<1;
+    const notePerlu=adaTidak&&!notePenuh;
+    html+=`<div class="finding" id="photo-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="foto">
+      <div class="finding-lbl">Dokumentasi Foto — ${asp} <span style="color:${fotoKurang?'var(--red)':'var(--muted)'};font-weight:700">(${photos.length}/5${fotoKurang?' · wajib minimal 1':''})</span></div>
       <div class="photo-row">
         ${photos.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
-        ${photos.length<5?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
+        ${photos.length<5?`<label class="photo-add" style="${fotoKurang?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
       </div>
-      <textarea class="note-input" placeholder="Catatan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
+    </div>`;
+    html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${notePerlu?'border-color:var(--red)':''}">
+      <div class="finding-lbl">Keterangan Temuan — ${asp} ${adaTidak?`<span style="color:${notePerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib diisi — terdapat klausul "Tidak")</span>`:'<span style="color:var(--muted);font-weight:400">(opsional)</span>'}</div>
+      <textarea class="note-input" style="${notePerlu?'border-color:var(--red)':''}" placeholder="Jelaskan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
     </div>`;
     html+=`</div>`;
   });
@@ -491,10 +655,58 @@ function unlockSession(){
 }
 function setAns(key,val){if(isLocked())return lockBlock();DRAFT.answers[key]=DRAFT.answers[key]===val?undefined:val;saveDraftLite();renderAssessBody();updateSpine();}
 function setInterview(idx,n){if(isLocked())return lockBlock();DRAFT.interviewVals[idx]=DRAFT.interviewVals[idx]===n?0:n;saveDraftLite();renderAssessBody();updateSpine();}
-function d_setNote(areaId,v){if(isLocked())return;DRAFT.notes[areaId]=v;saveDraftLite();}
+function d_setNote(areaId,v){
+  if(isLocked())return;
+  DRAFT.notes[areaId]=v;saveDraftLite();
+  // (P2) update indikator wajib secara live tanpa re-render penuh
+  const box=document.getElementById('temuan-'+areaId.replace(/[^\w]/g,'_'));
+  if(box&&v.trim()){box.style.borderColor='';const ta=box.querySelector('textarea');if(ta)ta.style.borderColor='';const lbl=box.querySelector('.finding-lbl span');if(lbl){lbl.style.color='var(--muted)';lbl.style.fontWeight='400';lbl.textContent='(wajib diisi — terdapat klausul "Tidak")'.replace('wajib diisi — ','');}}
+}
 function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}
   const ls=$('#live-score');if(ls){const lv=liveScore(DRAFT);const g=gradeFor(lv.avg);ls.style.color=g.color;ls.textContent=lv.avg?'Total '+lv.avg.toFixed(2)+' · '+g.label:'Total —';}}
-function navArea(dir){DRAFT.curArea=Math.max(0,Math.min(DRAFT.areas.length,DRAFT.curArea+dir));saveDraftLite();window.scrollTo(0,0);renderAssess();}
+/* [P2] Cek kelengkapan wajib (foto min 1 + temuan wajib jika ada "Tidak") untuk area pada step saat ini.
+   Mengembalikan elemen pertama yang belum lengkap, atau null jika sudah lengkap. */
+function validateCurrentStep(){
+  const d=DRAFT,step=d.curArea;
+  if(step===0)return null; // step interview tidak divalidasi di sini
+  const areaId=d.areas[step-1];
+  const area=STORE.config.areaChecks.find(a=>a.id===areaId);
+  if(!area)return null;
+  for(const asp of ASPECTS){
+    const krit=area.aspects[asp];if(!krit||!krit.length)continue;
+    const akey=`${areaId}|${asp}`;
+    const photos=d.photos[akey]||[];
+    if(photos.length<1){
+      const el=document.getElementById('photo-'+akey.replace(/[^\w]/g,'_'));
+      if(el)return el;
+    }
+    const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
+    const note=(d.notes[akey]||'').trim();
+    if(adaTidak&&!note){
+      const el=document.getElementById('temuan-'+akey.replace(/[^\w]/g,'_'));
+      if(el)return el;
+    }
+  }
+  return null;
+}
+function spotlightElement(el){
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.style.transition='none';
+  el.style.boxShadow='0 0 0 3px var(--red)';
+  el.style.borderColor='var(--red)';
+  setTimeout(()=>{el.style.transition='box-shadow .6s';el.style.boxShadow='none';},900);
+}
+function navArea(dir){
+  if(dir>0){
+    const bad=validateCurrentStep();
+    if(bad){
+      toast('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum lanjut');
+      spotlightElement(bad);
+      return;
+    }
+  }
+  DRAFT.curArea=Math.max(0,Math.min(DRAFT.areas.length,DRAFT.curArea+dir));saveDraftLite();window.scrollTo(0,0);renderAssess();
+}
 
 /* ---- Dinamika area saat assessment (concern 4) ---- */
 function removeAreaFromSession(areaId){
@@ -571,7 +783,7 @@ function generateFindings(draft){
       const gagal=krit.filter((_,i)=>draft.answers[`${areaId}|${asp}|${i}`]!=='ya');
       out.push({
         id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
-        area:area.name, kategori:asp, r5:R5MAP[asp],
+        area:area.name, areaId:area.id, kategori:asp, r5:R5MAP[asp],
         skor,
         deskripsi:`[Nilai ${skor}] ${asp} belum terpenuhi: ${gagal.join('; ')}`,
         foto:(draft.photos&&draft.photos[`${areaId}|${asp}`]&&draft.photos[`${areaId}|${asp}`][0])||'',
@@ -584,6 +796,12 @@ function generateFindings(draft){
   return out;
 }
 function finishAssess(){
+  const bad=validateCurrentStep();
+  if(bad){
+    toast('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum melihat hasil');
+    spotlightElement(bad);
+    return;
+  }
   const rep=computeReport(DRAFT);
   DRAFT.avg=rep.avg;DRAFT.finishedAt=new Date().toISOString();
   // hasilkan temuan hanya jika belum ada (agar perubahan manual tidak tertimpa)
@@ -626,50 +844,91 @@ function buildSyncPayload(rec){
   return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
     predikat:rep.grade.label,record:recOut,detail,
     findings:(rec.findings||[]).map(f=>({
-      id:f.id,area:f.area,kategori:f.kategori,skor:f.skor||'',
+      id:f.id,area:f.area,areaId:f.areaId||'',kategori:f.kategori,skor:f.skor||'',
       deskripsi:f.deskripsi||'',penyebab:f.penyebab||'',saran:f.saran||'',target:f.target||'',
       deskPerbaikan:f.deskPerbaikan||'',tglPerbaikan:f.tglPerbaikan||'',
-      status:f.status||'Open',verifikator:f.verifikator||''
+      status:f.status||'Open',verifikator:f.verifikator||'',
+      foto:f.foto||'',fotoPerbaikan:f.fotoPerbaikan||''
     }))};
 }
+/* [P7] POST dengan progress upload (%) via XHR — fetch() tidak expose progress upload native */
+function xhrPostProgress(url,bodyStr,onProgress){
+  return new Promise((resolve,reject)=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',url,true);
+    xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8');
+    xhr.upload.onprogress=function(e){
+      if(e.lengthComputable&&onProgress)onProgress(Math.round(e.loaded/e.total*100));
+    };
+    xhr.onload=function(){
+      try{resolve(JSON.parse(xhr.responseText));}
+      catch(err){reject(new Error('Respons tidak valid dari server'));}
+    };
+    xhr.onerror=function(){reject(new Error('Gagal terhubung ke server'));};
+    xhr.send(bodyStr);
+  });
+}
+/* [P7] Modal progress sinkronisasi */
+function showSyncProgress(label){
+  $('#modal-root').innerHTML=`<div class="modal-bg"><div class="modal" style="text-align:center;padding:30px 22px">
+    <div style="font-weight:800;font-family:Archivo;margin-bottom:14px">${esc(label)}</div>
+    <div class="bar" style="height:10px;background:#DCE4DF;border-radius:99px;overflow:hidden;margin-bottom:8px">
+      <div id="sync-prog-fill" style="height:100%;width:0%;background:var(--lime);border-radius:99px;transition:width .15s"></div>
+    </div>
+    <div id="sync-prog-pct" style="font-size:13px;color:var(--muted);font-weight:700">Menyiapkan data…</div>
+  </div></div>`;
+}
+function updateSyncProgress(pct){
+  const f=$('#sync-prog-fill'),p=$('#sync-prog-pct');
+  if(f)f.style.width=pct+'%';
+  if(p)p.textContent=pct+'% terkirim';
+}
+function hideSyncProgress(){closeModal();}
 async function syncSession(id){
   if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   const rec=STORE.sessions.find(s=>s.id===id);
   if(!rec){alert('Sesi tidak ditemukan.');return;}
-  toast('Sedang mengirim data ke Google…');
+  showSyncProgress('Mengirim Data ke Google…');
   try{
-    const res=await fetch(SYNC_URL,{method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify(buildSyncPayload(rec))});
-    const out=await res.json();
+    const out=await xhrPostProgress(SYNC_URL,JSON.stringify(buildSyncPayload(rec)),updateSyncProgress);
+    hideSyncProgress();
     if(out.ok){
       rec.synced=true;rec.syncedAt=new Date().toISOString();rec.locked=true;
       rec.syncCount=out.syncCount||((rec.syncCount||0)+1);saveStore();
-      alert('BERHASIL DIKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nJumlah foto terkirim: '+(out.photos||0)+'\n\nSesi ini kini terkunci dan hanya dapat dibaca.');
+      const dup=out.duplicateWarning;
+      const dupMsg=dup?`\n\n⚠️ PERINGATAN DATA GANDA\nKombinasi ${esc(dup.pu)} — ${esc(dup.loc)} · ${esc(dup.periode)} ${esc(dup.tahun)} [${jenisLabel(dup.jenis)}] SUDAH pernah dinilai oleh asesor lain: ${esc(dup.asesorLain)}.\nMohon koordinasikan dengan admin untuk memastikan data mana yang dipakai sebagai acuan resmi.`:'';
+      alert('BERHASIL DIKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nJumlah foto terkirim: '+(out.photos||0)+'\n\nSesi ini kini terkunci dan hanya dapat dibaca.'+dupMsg);
       if(VIEW==='admin')renderAdmin();
       if(VIEW==='report')render();
     }else alert('GAGAL mengirim data.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message);}
+  }catch(e){hideSyncProgress();alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message);}
 }
 async function syncAllUnsynced(){
   if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   const pending=STORE.sessions.filter(s=>!s.synced);
   if(!pending.length){alert('Seluruh data telah tersinkron ke Google.');return;}
   if(!confirm('Kirim '+pending.length+' penilaian yang belum tersinkron ke Google?'))return;
-  toast(`Sedang mengirim ${pending.length} sesi…`);
-  let ok=0,gagal=0;
-  for(const s of pending){
+  showSyncProgress(`Mengirim ${pending.length} Sesi ke Google…`);
+  let ok=0,gagal=0;const dups=[];
+  for(let i=0;i<pending.length;i++){
+    const s=pending[i];
     try{
-      const res=await fetch(SYNC_URL,{method:'POST',
-        headers:{'Content-Type':'text/plain;charset=utf-8'},
-        body:JSON.stringify(buildSyncPayload(s))});
-      const out=await res.json();
-      if(out.ok){s.synced=true;s.syncedAt=new Date().toISOString();s.locked=true;s.syncCount=out.syncCount||((s.syncCount||0)+1);ok++;}
+      const out=await xhrPostProgress(SYNC_URL,JSON.stringify(buildSyncPayload(s)),pct=>{
+        // progress gabungan: sesi selesai + progress sesi berjalan, dibagi total sesi
+        updateSyncProgress(Math.round((i*100+pct)/pending.length));
+        const p=$('#sync-prog-pct');if(p)p.textContent=`Sesi ${i+1}/${pending.length} · ${pct}%`;
+      });
+      if(out.ok){
+        s.synced=true;s.syncedAt=new Date().toISOString();s.locked=true;s.syncCount=out.syncCount||((s.syncCount||0)+1);ok++;
+        if(out.duplicateWarning)dups.push(Object.assign({loc:s.loc,pu:s.pu},out.duplicateWarning));
+      }
       else gagal++;
     }catch(e){gagal++;}
   }
+  hideSyncProgress();
   saveStore();renderAdmin();
-  alert('PENGIRIMAN SELESAI\n\nBerhasil: '+ok+'\nGagal: '+gagal+(gagal?'\n\nData yang gagal terkirim dapat dicoba kembali.':''));
+  const dupMsg=dups.length?`\n\n⚠️ ${dups.length} KOMBINASI GANDA TERDETEKSI:\n`+dups.map(x=>`• ${esc(x.pu)} — ${esc(x.loc)} · ${esc(x.periode)} ${esc(x.tahun)} (asesor lain: ${esc(x.asesorLain)})`).join('\n'):'';
+  alert('PENGIRIMAN SELESAI\n\nBerhasil: '+ok+'\nGagal: '+gagal+(gagal?'\n\nData yang gagal terkirim dapat dicoba kembali.':'')+dupMsg);
 }
 
 /* ---------- REPORT ---------- */
@@ -688,7 +947,7 @@ function renderReport(){
     <div class="predikat-hero" style="background:linear-gradient(135deg,${g.color},${shade(g.color,-18)})">
       <div class="score">${rep.avg?rep.avg.toFixed(2):'—'}</div>
       <div class="lbl">${esc(g.label)}</div>
-      <div class="sub">${esc(d.periode||"")}${d.tahun?' '+esc(d.tahun):''}${d.jenis?' · '+esc(d.jenis):''} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
+      <div class="sub">${esc(d.periode||"")}${d.tahun?' '+esc(d.tahun):''}${d.jenis?' · '+esc(jenisLabel(d.jenis)):''} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div>
     </div>
     <div class="radar-wrap">
       <div style="font-weight:800;font-family:Archivo;margin-bottom:10px">Profil 5R</div>
@@ -722,15 +981,38 @@ function renderReport(){
     <div class="card">
       <h2>Ekspor Data</h2>
       <p class="hint">Simpan hasil penilaian untuk keperluan laporan atau kearsipan.</p>
-      ${SYNC_URL?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="syncSession('${d.id}')">Kirim ke Google</button>`:''}
       <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">Unduh sebagai CSV (Excel)</button>
       <button class="btn btn-ghost btn-block" onclick="window.print()">Cetak atau Simpan sebagai PDF</button>
+      ${(d.markedDone&&!d.synced)?`<button class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--muted);font-size:12px" onclick="exitReportWithoutSync()">Keluar tanpa mengirim ke Google</button>`:''}
     </div>
   </div>
   <div class="botbar">
     <button class="btn btn-ghost" onclick="VIEW='assess';render()">‹ Ubah</button>
-    <button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai</button>
+    ${d.markedDone||d.synced
+      ?(d.synced
+        ?`<button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai · Keluar</button>`
+        :`<button class="btn btn-primary" onclick="syncSession('${d.id}')" ${!SYNC_URL?'disabled style="opacity:.4"':''}>Kirim ke Google</button>`)
+      :`<button class="btn btn-primary" onclick="markReportDone('${d.id}')">Selesai</button>`}
   </div>`;
+}
+/* [P8] "Selesai" hanya menandai siap-kirim (tidak langsung keluar) — mengaktifkan tombol Kirim ke Google */
+function markReportDone(id){
+  const i=STORE.sessions.findIndex(s=>s.id===id);
+  if(i>=0){STORE.sessions[i].markedDone=true;saveStore();}
+  if(DRAFT&&DRAFT.id===id)DRAFT.markedDone=true;
+  render();
+  toast(SYNC_URL?'Ditandai selesai — silakan kirim ke Google':'Ditandai selesai');
+}
+function exitReportWithoutSync(){
+  if(!confirm('Keluar tanpa mengirim ke Google? Data tetap tersimpan pada perangkat ini dan dapat dikirim kemudian dari Kelola Formulir → Data Tersimpan.'))return;
+  VIEW='home';DRAFT=null;render();
+}
+/* (P9) expand/collapse detail per-lokasi di tabel KPI Dashboard Nilai */
+function toggleDNDetail(pi){
+  const row=document.getElementById('dn-detail-'+pi),caret=document.getElementById('dn-caret-'+pi);
+  if(!row)return;
+  const open=row.classList.toggle('hidden');
+  if(caret)caret.textContent=open?'▸':'▾';
 }
 function toggleDetail(ri){
   const row=document.getElementById('detail-'+ri),caret=document.getElementById('caret-'+ri);
@@ -809,7 +1091,10 @@ function renderAdmin(){
     <div class="adm-tab">
       <button class="${ADMIN_TAB==='area'?'on':''}" onclick="ADMIN_TAB='area';renderAdmin()">Area Pemeriksaan</button>
       <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Formulir per Lokasi</button>
+      <button class="${ADMIN_TAB==='fotostandar'?'on':''}" onclick="ADMIN_TAB='fotostandar';renderAdmin()">Foto Standar</button>
       <button class="${ADMIN_TAB==='target'?'on':''}" onclick="ADMIN_TAB='target';renderAdmin()">Target Nilai</button>
+      <button class="${ADMIN_TAB==='monitoring'?'on':''}" onclick="ADMIN_TAB='monitoring';renderAdmin()">Monitoring Temuan</button>
+      <button class="${ADMIN_TAB==='users'?'on':''}" onclick="ADMIN_TAB='users';renderAdmin()">Kelola Asesor</button>
       <button class="${ADMIN_TAB==='sessions'?'on':''}" onclick="ADMIN_TAB='sessions';renderAdmin()">Data Tersimpan</button>
       <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Pencadangan</button>
     </div>
@@ -819,7 +1104,10 @@ function renderAdmin(){
   const b=$('#adm-body');
   if(ADMIN_TAB==='area')b.innerHTML=admArea();
   else if(ADMIN_TAB==='matrix')b.innerHTML=admMatrix();
+  else if(ADMIN_TAB==='fotostandar')b.innerHTML=admFotoStandar();
   else if(ADMIN_TAB==='target')b.innerHTML=admTarget();
+  else if(ADMIN_TAB==='monitoring'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Memuat data temuan…</div>';loadMonitoringTemuan();}
+  else if(ADMIN_TAB==='users'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Memuat daftar asesor…</div>';loadUserList();}
   else if(ADMIN_TAB==='sessions')b.innerHTML=admSessions();
   else b.innerHTML=admData();
 }
@@ -918,6 +1206,61 @@ function toggleArea(pu,loc,areaId,on){
 function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];STORE.config._dirty=true;saveStore();renderAdmin();}
 function delLoc(loc){if(!confirm('Hapus Lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];STORE.config._dirty=true;saveStore();renderAdmin();}
 
+/* ===== (P4) FOTO STANDAR / ACUAN per Area + Aspek =====
+   Disimpan di STORE.config.fotoStandar = { [areaId]: { [aspek]: dataUrl } }
+   Disebarkan ke seluruh asesor lewat mekanisme pushConfig() yang sudah ada. */
+function fotoStandarFor(areaId,asp){
+  const fs=STORE.config.fotoStandar||{};
+  return (fs[areaId]&&fs[areaId][asp])||'';
+}
+function zoomFotoAcuan(src){
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="closeModal()" style="align-items:center">
+    <img src="${src}" style="max-width:92vw;max-height:85vh;border-radius:12px" onclick="event.stopPropagation()">
+  </div>`;
+}
+function admFotoStandar(){
+  if(!window._fsArea)window._fsArea=STORE.config.areaChecks[0]?.id;
+  const area=STORE.config.areaChecks.find(a=>a.id===window._fsArea);
+  const fsKB=(fotoStandarUsage()/1024).toFixed(0);
+  return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2>
+    <p class="hint">Kelola foto acuan yang akan tampil kepada asesor sebagai panduan penilaian sebelum mengisi klausul aspek terkait. Foto ini juga dapat ditarik otomatis dari foto tindak lanjut (after) pada temuan yang telah ditutup — lihat Dashboard Temuan.</p>
+    <p class="hint" style="margin-bottom:0">Total ukuran foto standar saat ini: <b>~${fsKB} KB</b> — ikut tersebar ke penyimpanan setiap asesor saat formulir disinkronkan, jadi disarankan tidak berlebihan.</p>
+    </div>
+    <div class="card">
+    <label class="field" style="margin:0"><span class="lbl">Area Pemeriksaan</span>
+      <select class="input" onchange="window._fsArea=this.value;renderAdmin()">
+        ${STORE.config.areaChecks.map(a=>`<option value="${a.id}" ${a.id===window._fsArea?'selected':''}>${esc(a.name)}</option>`).join('')}
+      </select></label>
+    </div>
+    ${area?ASPECTS.map(asp=>{
+      if(!area.aspects[asp]||!area.aspects[asp].length)return '';
+      const foto=fotoStandarFor(area.id,asp);
+      return `<div class="card">
+        <div class="aspect-head"><span class="tag5r t-${asp}">${asp.toUpperCase()}</span></div>
+        <div class="photo-row">
+          ${foto?`<img src="${foto}" class="photo-thumb" style="width:100px;height:100px" onclick="rmFotoStandar('${area.id}','${asp}')">`
+                :`<label class="photo-add" style="width:100px;height:100px">+<input type="file" accept="image/*" style="display:none" onchange="addFotoStandar('${area.id}','${asp}',this)"></label>`}
+        </div>
+        <p class="hint" style="margin-top:6px;margin-bottom:0">${foto?'Ketuk foto untuk menghapus.':'Belum ada foto acuan untuk aspek ini.'}</p>
+      </div>`;
+    }).join(''):''}
+    ${syncConfigBtn()}`;
+}
+function addFotoStandar(areaId,asp,inp){
+  const f=inp.files[0];if(!f)return;
+  handlePhotoStandar(f,url=>{
+    STORE.config.fotoStandar=STORE.config.fotoStandar||{};
+    STORE.config.fotoStandar[areaId]=STORE.config.fotoStandar[areaId]||{};
+    STORE.config.fotoStandar[areaId][asp]=url;
+    STORE.config._dirty=true;saveStore();renderAdmin();toast('Foto standar telah disimpan');
+  });
+}
+function rmFotoStandar(areaId,asp){
+  if(!confirm('Hapus foto standar untuk aspek ini?'))return;
+  if(STORE.config.fotoStandar&&STORE.config.fotoStandar[areaId])delete STORE.config.fotoStandar[areaId][asp];
+  STORE.config._dirty=true;saveStore();renderAdmin();toast('Foto standar telah dihapus');
+}
+
 /* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
 function targetLoc(pu,loc){const t=STORE.config.targets||{};return t[pu+'::'+loc]||0;}
 function targetPU(pu){
@@ -999,13 +1342,200 @@ function setWeight(which,v){
   saveStore();renderAdmin();
 }
 
+/* ===== (P5) MONITORING TEMUAN — menu admin khusus (data Cloud) untuk melengkapi
+   Target Penyelesaian, Deskripsi Tindak Lanjut, Tanggal, Status, dan Verifikator.
+   Field ini SENGAJA dipisah dari modal asesor (editFinding) agar asesor hanya
+   bertanggung jawab sampai "Saran Tindak Lanjut" — finalisasi & follow-up dikelola
+   admin di sini, memakai identitas login admin (getAuth().name) sebagai uid. ===== */
+let _monitoringData=null;
+let MONITOR_FILTER={status:'Open',pu:''};
+async function loadMonitoringTemuan(){
+  const b=$('#adm-body');if(!b)return;
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    _monitoringData=out.findings||[];
+    renderMonitoringTemuan();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadMonitoringTemuan()">Coba Lagi</button></div>`;}
+}
+function renderMonitoringTemuan(){
+  const b=$('#adm-body');if(!b)return;
+  let rows=_monitoringData||[];
+  const pus=[...new Set(rows.map(x=>x['PU']).filter(Boolean))];
+  if(MONITOR_FILTER.status)rows=rows.filter(x=>(x['Status']||'Open')===MONITOR_FILTER.status);
+  if(MONITOR_FILTER.pu)rows=rows.filter(x=>x['PU']===MONITOR_FILTER.pu);
+  b.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0">Monitoring Temuan</h2>
+      <button class="btn btn-ghost btn-sm" onclick="loadMonitoringTemuan()">Perbarui</button>
+    </div>
+    <p class="hint">Lengkapi target penyelesaian, deskripsi tindak lanjut, tanggal, status, dan verifikator untuk setiap temuan yang telah tersinkron. Setiap perubahan status tercatat pada jejak audit.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <select class="input" style="flex:1;min-width:110px" onchange="MONITOR_FILTER.status=this.value;renderMonitoringTemuan()">
+        <option value="Open" ${MONITOR_FILTER.status==='Open'?'selected':''}>Status: Terbuka</option>
+        <option value="Close" ${MONITOR_FILTER.status==='Close'?'selected':''}>Status: Selesai</option>
+        <option value="" ${MONITOR_FILTER.status===''?'selected':''}>Seluruh Status</option>
+      </select>
+      <select class="input" style="flex:1;min-width:110px" onchange="MONITOR_FILTER.pu=this.value;renderMonitoringTemuan()">
+        <option value="">Seluruh PU</option>${pus.map(p=>`<option ${p===MONITOR_FILTER.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+    </div>
+  </div>
+  ${rows.length?rows.map(x=>monitoringRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak terdapat temuan untuk kombinasi penyaring ini.</div>'}`;
+}
+function monitoringRow(x){
+  const stColor=x['Status']==='Close'?'var(--green-400)':'var(--red)';
+  const id=x['ID Temuan'];
+  return `<div class="card" style="padding:14px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+      <span class="tag5r t-${x['Kategori']}">${(x['Kategori']||'').toUpperCase()}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(x['Status']||'Open')}</span>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')} · ${esc(x['Area']||'')}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['Deskripsi']||'')}</div>
+    ${x['Saran']?`<div style="font-size:12px;color:var(--green-400);margin-bottom:8px">↳ Saran asesor: ${esc(x['Saran'])}</div>`:''}
+    <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" id="mn-target-${id}" value="${esc(x['Target']||'')}" placeholder="contoh: 2026"></label>
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="mn-deskp-${id}" style="min-height:44px">${esc(x['Deskripsi Perbaikan']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="mn-tglp-${id}" type="date" value="${esc((x['Tgl Perbaikan']||'').slice(0,10))}"></label>
+    <label class="field"><span class="lbl">Status</span><select class="input" id="mn-status-${id}">
+      <option ${x['Status']==='Open'?'selected':''}>Open</option><option ${x['Status']==='Close'?'selected':''}>Close</option></select></label>
+    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="mn-verif-${id}" value="${esc(x['Verifikator']||'')}" placeholder="Nama Verifikator"></label>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
+      <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveMonitoringItem('${esc(id)}')">Simpan</button>
+    </div>
+  </div>`;
+}
+async function saveMonitoringItem(id){
+  const fields={
+    Target:$('#mn-target-'+id).value.trim(),
+    'Deskripsi Perbaikan':$('#mn-deskp-'+id).value.trim(),
+    'Tgl Perbaikan':$('#mn-tglp-'+id).value,
+    Status:$('#mn-status-'+id).value,
+    Verifikator:$('#mn-verif-'+id).value.trim()
+  };
+  toast('Sedang menyimpan…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||'Admin'})});
+    const out=await res.json();
+    if(out.ok){
+      const t=(_monitoringData||[]).find(x=>x['ID Temuan']===id);
+      if(t)Object.assign(t,fields);
+      toast('Tersimpan');renderMonitoringTemuan();
+    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+
+/* ===== (P-uid) KELOLA ASESOR — admin daftarkan/reset/nonaktifkan akun asesor =====
+   Password TIDAK PERNAH terlihat oleh admin setelah dibuat — hanya bisa di-reset
+   ke password baru, tidak bisa "dilihat kembali" (konsisten dengan hash SHA-256). */
+let _userListData=null;
+async function loadUserList(){
+  const b=$('#adm-body');if(!b)return;
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan — kelola asesor memerlukan koneksi ke server.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=listUsers&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    _userListData=out.users||[];
+    renderUserList();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadUserList()">Coba Lagi</button></div>`;}
+}
+function renderUserList(){
+  const b=$('#adm-body');if(!b)return;
+  const users=_userListData||[];
+  b.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0">Kelola Akun Asesor</h2>
+      <button class="btn btn-ghost btn-sm" onclick="loadUserList()">Perbarui</button>
+    </div>
+    <p class="hint">Setiap asesor memerlukan akun (username + password) untuk masuk ke aplikasi. Password tidak pernah bisa dilihat kembali oleh admin — hanya dapat direset ke password baru.</p>
+    <button class="btn btn-amber btn-block" onclick="showRegisterUser()">+ Daftarkan Asesor Baru</button>
+  </div>
+  ${users.length?users.map(u=>`<div class="list-row">
+      <div class="nm">${esc(u.namaLengkap||u.username)}
+        <div style="font-size:12px;color:var(--muted);font-weight:400">@${esc(u.username)} · ${u.aktif==='Ya'?'<span style="color:var(--lime);font-weight:700">Aktif</span>':'<span style="color:var(--red);font-weight:700">Nonaktif</span>'}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="showResetPassword('${esc(u.username)}')">Reset Sandi</button>
+      <button class="btn ${u.aktif==='Ya'?'btn-danger':'btn-ghost'} btn-sm" onclick="toggleUserActive('${esc(u.username)}',${u.aktif!=='Ya'})">${u.aktif==='Ya'?'Nonaktifkan':'Aktifkan'}</button>
+    </div>`).join(''):'<div class="empty"><div class="ic">👤</div>Belum ada akun asesor terdaftar.</div>'}`;
+}
+function showRegisterUser(){
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Daftarkan Asesor Baru</h3>
+    <label class="field"><span class="lbl">Nama Lengkap</span><input class="input" id="ru-nama" placeholder="Nama Lengkap"></label>
+    <label class="field"><span class="lbl">Username</span><input class="input" id="ru-user" placeholder="Username (bebas, tanpa spasi)" autocomplete="off"></label>
+    <label class="field"><span class="lbl">Password Awal</span><input class="input" id="ru-pass" type="text" placeholder="Password awal untuk asesor ini"></label>
+    <p class="hint" style="margin-top:-8px">Sampaikan username dan password ini secara langsung kepada asesor yang bersangkutan.</p>
+    <div id="ru-err"></div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
+      <button class="btn btn-primary" style="flex:1" id="ru-submit" onclick="registerNewUser()">Daftarkan</button>
+    </div>
+  </div></div>`;
+}
+async function registerNewUser(){
+  const nama=$('#ru-nama').value.trim(), username=$('#ru-user').value.trim(), pass=$('#ru-pass').value;
+  const err=$('#ru-err');
+  if(!username||!pass){err.innerHTML='<p class="hint" style="color:var(--red)">Username dan password wajib diisi.</p>';return;}
+  if(/\s/.test(username)){err.innerHTML='<p class="hint" style="color:var(--red)">Username tidak boleh mengandung spasi.</p>';return;}
+  const btn=$('#ru-submit');btn.disabled=true;btn.textContent='Memproses…';
+  try{
+    const passwordHash=await sha256Hex(pass);
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'registerUser',username,namaLengkap:nama,passwordHash,dibuatOleh:getAuth().name||'Admin'})});
+    const out=await res.json();
+    if(out.ok){closeModal();toast('Akun asesor berhasil didaftarkan');loadUserList();}
+    else{err.innerHTML='<p class="hint" style="color:var(--red)">'+esc(out.error||'Gagal mendaftarkan akun')+'</p>';btn.disabled=false;btn.textContent='Daftarkan';}
+  }catch(e){err.innerHTML='<p class="hint" style="color:var(--red)">Gagal terhubung ke server.</p>';btn.disabled=false;btn.textContent='Daftarkan';}
+}
+function showResetPassword(username){
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Reset Password — @${esc(username)}</h3>
+    <label class="field"><span class="lbl">Password Baru</span><input class="input" id="rp-pass" type="text" placeholder="Password baru untuk asesor ini"></label>
+    <p class="hint" style="margin-top:-8px">Sampaikan password baru ini secara langsung kepada asesor yang bersangkutan.</p>
+    <div id="rp-err"></div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
+      <button class="btn btn-primary" style="flex:1" id="rp-submit" onclick="doResetPassword('${esc(username)}')">Reset</button>
+    </div>
+  </div></div>`;
+}
+async function doResetPassword(username){
+  const pass=$('#rp-pass').value;
+  const err=$('#rp-err');
+  if(!pass){err.innerHTML='<p class="hint" style="color:var(--red)">Password baru wajib diisi.</p>';return;}
+  const btn=$('#rp-submit');btn.disabled=true;btn.textContent='Memproses…';
+  try{
+    const passwordHash=await sha256Hex(pass);
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'resetPassword',username,passwordHash})});
+    const out=await res.json();
+    if(out.ok){closeModal();toast('Password telah direset');loadUserList();}
+    else{err.innerHTML='<p class="hint" style="color:var(--red)">'+esc(out.error||'Gagal mereset password')+'</p>';btn.disabled=false;btn.textContent='Reset';}
+  }catch(e){err.innerHTML='<p class="hint" style="color:var(--red)">Gagal terhubung ke server.</p>';btn.disabled=false;btn.textContent='Reset';}
+}
+async function toggleUserActive(username,aktif){
+  if(!confirm((aktif?'Aktifkan':'Nonaktifkan')+' akun @'+username+'?'))return;
+  toast('Memproses…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'setUserActive',username,aktif})});
+    const out=await res.json();
+    if(out.ok){toast('Status akun diperbarui');loadUserList();}
+    else alert('GAGAL.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+
 function admSessions(){
   if(!STORE.sessions.length)return `<div class="empty"><div class="ic">📋</div>Belum terdapat penilaian yang tersimpan.</div>`;
   const pending=STORE.sessions.filter(s=>!s.synced).length;
   const syncBar=SYNC_URL?`<button class="btn btn-primary btn-block btn-sm" style="margin-bottom:12px" onclick="syncAllUnsynced()">Kirim Seluruh Data ke Google${pending?` (${pending} belum tersinkron)`:' ✓'}</button>`:'';
   return syncBar+STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
     const sync=s.synced?'<span style="font-size:10px;color:var(--lime);font-weight:700">Tersinkron</span>':'<span style="font-size:10px;color:var(--amber);font-weight:700">Belum Tersinkron</span>';
-    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(s.jenis):''} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
+    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
       <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${s.avg?s.avg.toFixed(2):'—'}</span>
       ${SYNC_URL?`<button class="btn btn-ghost btn-sm" onclick="syncSession('${s.id}')">☁</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openSession('${s.id}')">Buka</button>
@@ -1187,6 +1717,9 @@ function editFinding(id){
   const penyebabOpts=['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya']
     .map(p=>`<option value="${esc(p)}" ${p===x.penyebab?'selected':''}>${p===''?'— Pilih penyebab —':esc(p)}</option>`).join('');
   const berulangBadge=x.auto&&x.berulang==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px;margin-left:6px">TEMUAN BERULANG</span>`:'';
+  /* (P5) Modal asesor DIPANGKAS sampai "Saran Tindak Lanjut" saja.
+     Target Penyelesaian, Tanggal, Status, dan Verifikator dipindah ke menu
+     admin "Monitoring Temuan" (data Cloud) — lihat monitoringTemuanTab(). */
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>${isNew?'Tambah':'Ubah'} Temuan ${berulangBadge}</h3>
     <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
@@ -1196,20 +1729,11 @@ function editFinding(id){
     <label class="field"><span class="lbl">Dokumentasi Foto Temuan</span>
       <div class="photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="efRmPhoto('foto')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('foto',this)"></label>`}</div>
     </label>
-    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · TINDAK LANJUT</div>
+    <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · SARAN TINDAK LANJUT</div>
     <label class="field"><span class="lbl">Penyebab (Root Cause)</span><select class="input" id="ef-penyebab">${penyebabOpts}</select></label>
     <p class="hint" style="margin-top:-8px;margin-bottom:12px">Pilih penyebab yang paling mendasari temuan ini. Membantu Direktorat melihat pola penyebab secara nasional, agar tindak lanjut mencegah temuan berulang.</p>
     <label class="field"><span class="lbl">Saran Tindak Lanjut</span><textarea class="input" id="ef-saran" style="min-height:50px">${esc(x.saran||'')}</textarea></label>
-    <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" id="ef-target" value="${esc(x.target||'')}" placeholder="contoh: 2026"></label>
-    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="ef-deskp" style="min-height:50px">${esc(x.deskPerbaikan||'')}</textarea></label>
-    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="ef-tglp" type="date" value="${esc((x.tglPerbaikan||'').slice(0,10))}"></label>
-    <label class="field"><span class="lbl">Dokumentasi Foto Tindak Lanjut</span>
-      <div class="photo-row">${x.fotoPerbaikan?`<img src="${x.fotoPerbaikan}" class="photo-thumb" onclick="efRmPhoto('fotoPerbaikan')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('fotoPerbaikan',this)"></label>`}</div>
-    </label>
-    <div style="font-size:11px;font-weight:800;color:var(--green-400);letter-spacing:.05em;margin:14px 0 8px">C · VERIFIKASI</div>
-    <label class="field"><span class="lbl">Status</span><select class="input" id="ef-status">
-      <option ${x.status==='Open'?'selected':''}>Open</option><option ${x.status==='Close'?'selected':''}>Close</option></select></label>
-    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="ef-verif" value="${esc(x.verifikator||'')}" placeholder="Nama Verifikator"></label>
+    <p class="hint" style="margin-top:-8px">Target penyelesaian, tanggal, status, dan verifikasi dikelola oleh admin melalui menu Monitoring Temuan setelah data tersinkron ke Google.</p>
     <div style="display:flex;gap:10px;margin-top:8px">
       ${isNew?'':`<button class="btn btn-danger" onclick="delFinding('${x.id}')">Hapus</button>`}
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
@@ -1226,23 +1750,30 @@ function saveFinding(id,isNew){
   if(isLocked())return lockBlock();
   const d=DRAFT;d.findings=d.findings||[];
   const kat=$('#ef-kat').value;
-  const obj={id,area:$('#ef-area').value,kategori:kat,r5:R5MAP[kat],
+  const prev=id?d.findings.find(f=>f.id===id):null;
+  const areaName=$('#ef-area').value;
+  const areaObj=STORE.config.areaChecks.find(a=>a.name===areaName);
+  const obj={id,area:areaName,areaId:areaObj?areaObj.id:((prev&&prev.areaId)||''),kategori:kat,r5:R5MAP[kat],
     deskripsi:$('#ef-desk').value.trim(),foto:window._efPhoto.foto||'',
     penyebab:$('#ef-penyebab').value,
-    saran:$('#ef-saran').value.trim(),target:$('#ef-target').value.trim(),
-    deskPerbaikan:$('#ef-deskp').value.trim(),tglPerbaikan:$('#ef-tglp').value,
-    fotoPerbaikan:window._efPhoto.fotoPerbaikan||'',
-    status:$('#ef-status').value,verifikator:$('#ef-verif').value.trim(),auto:false};
+    saran:$('#ef-saran').value.trim(),
+    // (P5) field tindak lanjut lanjutan dipertahankan dari nilai sebelumnya (dikelola admin di Cloud),
+    // bukan lagi dari input asesor di modal ini
+    target:(prev&&prev.target)||x_defaultTarget(),
+    deskPerbaikan:(prev&&prev.deskPerbaikan)||'',tglPerbaikan:(prev&&prev.tglPerbaikan)||'',
+    fotoPerbaikan:(prev&&prev.fotoPerbaikan)||'',
+    status:(prev&&prev.status)||'Open',verifikator:(prev&&prev.verifikator)||'',auto:false};
   if(isNew)d.findings.push(obj);
   else{const i=d.findings.findIndex(f=>f.id===id);if(i>=0)d.findings[i]={...d.findings[i],...obj};}
   saveDraftSession();closeModal();renderFindings();toast('Temuan telah tersimpan');
 }
+function x_defaultTarget(){return String(new Date().getFullYear());}
 function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan telah dihapus');}
 
 
 /* ============ DASHBOARD NILAI (narik cloud, admin) ============ */
 let _dashNilaiData=null;
-let DN_FILTER={tahun:'',jenis:''};   // [MT] filter tahun & jenis
+let DN_FILTER={tahun:'',jenis:'Resmi'};   // [MT] filter tahun & jenis — default Direktorat Operasi (Internal wajib difilter manual)
 let DN_SHOWTREN=false;               // [MT] toggle view tren
 function renderDashNilai(){
   app().innerHTML=topbar('Dashboard Nilai','Realisasi terhadap Target — Data dari Google')+`
@@ -1294,7 +1825,7 @@ function drawDashNilai(){
       <label class="field" style="flex:1;min-width:110px;margin:0"><span class="lbl">Jenis</span>
         <select class="input" onchange="DN_FILTER.jenis=this.value;drawDashNilai()">
           <option value="">Semua Jenis</option>
-          <option ${DN_FILTER.jenis==='Resmi'?'selected':''}>Resmi</option>
+          <option value="Resmi" ${DN_FILTER.jenis==='Resmi'?'selected':''}>Asesmen Direktorat Operasi</option>
           <option ${DN_FILTER.jenis==='Internal'?'selected':''}>Internal</option>
         </select></label>
     </div>
@@ -1358,7 +1889,7 @@ function drawDashNilai(){
 
   // ===== HERO: Nilai Final Tertimbang =====
   let html=filterPanel+warnHtml+wWarn+`<div class="card" style="text-align:center;background:linear-gradient(135deg,var(--green),${shade('#1E7A5A',-18)});color:#fff">
-    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI AKHIR NASIONAL ${semuaLengkap?'(TERTIMBANG)':'(SEMENTARA · Mid Year)'}${DN_FILTER.tahun?' · '+esc(DN_FILTER.tahun):''}${DN_FILTER.jenis?' · '+esc(DN_FILTER.jenis):''}</div>
+    <div style="font-size:12px;opacity:.7;font-weight:700;letter-spacing:.05em">NILAI AKHIR NASIONAL ${semuaLengkap?'(TERTIMBANG)':'(SEMENTARA · Mid Year)'}${DN_FILTER.tahun?' · '+esc(DN_FILTER.tahun):''}${DN_FILTER.jenis?' · '+esc(jenisLabel(DN_FILTER.jenis)):''}</div>
     <div style="font-family:Archivo;font-weight:800;font-size:46px;line-height:1;margin:4px 0">${nasFinal?nasFinal.toFixed(2):'—'}</div>
     <div style="font-size:13px;opacity:.85">Target ${nasTarget?nasTarget.toFixed(2):'—'} · ${vsTarget(nasFinal,nasTarget)}</div>
     <div style="font-size:11px;opacity:.7;margin-top:8px">Mid Year: ${nasMid?nasMid.toFixed(2):'—'} (${w.midYear}%) · End Year: ${nasEnd?nasEnd.toFixed(2):'—'} (${w.endYear}%)</div>
@@ -1376,18 +1907,32 @@ function drawDashNilai(){
       </div>`;}).join('')}
   </div>`;
 
-  // ===== TABEL KPI =====
+  // ===== TABEL KPI (P9: expandable per PU -> detail per lokasi) =====
   html+=`<div class="card"><h2 style="font-size:16px">Tabel Indikator Kinerja — Realisasi terhadap Target</h2>
+    <p class="hint">Ketuk salah satu PU untuk melihat rincian nilai per lokasi/zona.</p>
     <table class="rep"><thead><tr><th>PU</th><th class="num">Mid</th><th class="num">End</th><th class="num">Final</th><th class="num">Target</th><th class="num">Capai</th></tr></thead><tbody>
-    ${puRows.map(p=>{
+    ${puRows.map((p,pi)=>{
       const pc=p.target?Math.round(p.final/p.target*100):0;
       const ok=p.target&&p.final>=p.target;
-      return `<tr><td>${esc(p.pu)}</td>
+      const head=`<tr class="rep-head tappable" onclick="toggleDNDetail(${pi})">
+        <td>${esc(p.pu)} <span class="exp-caret" id="dn-caret-${pi}">▸</span></td>
         <td class="num">${p.mid?p.mid.toFixed(2):'—'}</td>
         <td class="num">${p.end?p.end.toFixed(2):'—'}</td>
         <td class="num" style="font-weight:800">${p.final?p.final.toFixed(2):'—'}</td>
         <td class="num">${p.target?p.target.toFixed(2):'—'}</td>
         <td class="num" style="color:${ok?'var(--green)':'var(--red)'};font-weight:700">${p.target?pc+'%':'—'}</td></tr>`;
+      const locs=Object.keys(STORE.config.matrix[p.pu]||{});
+      const detailBody=locs.map(loc=>{
+        const midL=byLocPer[p.pu+'::'+loc+'::mid'],endL=byLocPer[p.pu+'::'+loc+'::end'];
+        const tgt=targetLoc(p.pu,loc);
+        const finalL=(midL&&endL)?(midL.nilai*wMid+endL.nilai*wEnd):(endL?endL.nilai:(midL?midL.nilai:0));
+        if(!midL&&!endL)return '';
+        return `<div class="klausul-row"><span class="kl-q">${esc(loc)}</span>
+          <span class="kl-tag" style="color:var(--muted)">Mid ${midL?midL.nilai.toFixed(2):'—'} · End ${endL?endL.nilai.toFixed(2):'—'}</span>
+          <span class="kl-tag" style="font-weight:800;color:${tgt&&finalL>=tgt?'var(--green)':'var(--red)'}">${finalL?finalL.toFixed(2):'—'}${tgt?' / '+tgt.toFixed(2):''}</span></div>`;
+      }).join('');
+      const body=`<tr class="rep-detail hidden" id="dn-detail-${pi}"><td colspan="6" style="padding:0 8px 12px">${detailBody||'<p class="hint">Belum ada realisasi lokasi untuk PU ini.</p>'}</td></tr>`;
+      return head+body;
     }).join('')}
     <tr style="background:var(--concrete);font-weight:800"><td>NASIONAL</td>
       <td class="num">${nasMid?nasMid.toFixed(2):'—'}</td>
@@ -1395,7 +1940,9 @@ function drawDashNilai(){
       <td class="num">${nasFinal?nasFinal.toFixed(2):'—'}</td>
       <td class="num">${nasTarget?nasTarget.toFixed(2):'—'}</td>
       <td class="num" style="color:${nasTarget&&nasFinal>=nasTarget?'var(--green)':'var(--red)'}">${nasTarget?Math.round(nasFinal/nasTarget*100)+'%':'—'}</td></tr>
-    </tbody></table></div>`;
+    </tbody></table>
+    <button class="btn btn-ghost btn-block btn-sm" style="margin-top:10px" onclick="window.print()">🖶 Cetak / Simpan sebagai PDF</button>
+    </div>`;
 
   // ===== GRAFIK realisasi vs target (final per PU) =====
   html+=`<div class="card"><h2 style="font-size:16px">Grafik Nilai Akhir terhadap Target per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.final,target:p.target})))}</div>`;
@@ -1469,7 +2016,7 @@ function trenAntarTahun(allRows){
     legend+=`<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;font-size:11px"><span style="width:12px;height:3px;background:${col};display:inline-block"></span>${esc(pu)}</span>`;
   });
   return `<div style="margin-top:12px">
-    <div style="font-weight:700;font-size:13px;margin-bottom:6px">Tren Rata-rata Nilai per Production Unit${jenisF?' ('+esc(jenisF)+')':''}</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">Tren Rata-rata Nilai per Production Unit${jenisF?' ('+esc(jenisLabel(jenisF))+')':''}</div>
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:420px;display:block">${grid}${xlab}${lines}</svg>
     <div style="margin-top:6px">${legend}</div>
   </div>`;
@@ -1599,15 +2146,30 @@ function openCloudFinding(id){
   const penyebabOpts=['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya']
     .map(p=>`<option value="${esc(p)}" ${p===(t['Penyebab']||'')?'selected':''}>${p===''?'— Pilih penyebab —':esc(p)}</option>`).join('');
   const folderUrl=t['Folder Foto']||'';
+  const sudahStandar=t['Dijadikan Standar']==='Ya';
   const berulangBadge=t['Berulang']==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px;margin-left:6px">TEMUAN BERULANG</span>`:'';
+  // (P-perf) Listing utama TIDAK membawa dataURL foto (biar ringan) — hanya penanda
+  // _adaFotoTemuan/_adaFotoPerbaikan. Isi foto sebenarnya di-fetch on-demand di bawah.
+  const adaFotoT=!!t['_adaFotoTemuan'], adaFotoP=!!t['_adaFotoPerbaikan'];
+  const beforeAfter=(adaFotoT||adaFotoP)?`<div style="display:flex;gap:10px;margin-bottom:12px" id="cf-beforeafter">
+    <div style="flex:1;text-align:center">
+      <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Before (Temuan)</div>
+      <div id="cf-foto-before" style="aspect-ratio:1;background:var(--concrete);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">${adaFotoT?'Memuat…':'Tidak ada'}</div>
+    </div>
+    <div style="flex:1;text-align:center">
+      <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:4px">After (Perbaikan)</div>
+      <div id="cf-foto-after" style="aspect-ratio:1;background:var(--concrete);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">${adaFotoP?'Memuat…':'Belum ada'}</div>
+    </div>
+  </div>`:'';
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
     <h3>Rincian Temuan (Cloud) ${berulangBadge}</h3>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${esc(t['PU']||'')} — ${esc(t['Lokasi']||'')} · ${esc(t['Periode']||'')} · ${esc(t['Asesor']||'')}</div>
     <div style="font-size:11px;font-weight:800;color:var(--green);letter-spacing:.05em;margin-bottom:8px">A · HASIL TEMUAN</div>
+    ${beforeAfter}
     <label class="field"><span class="lbl">Area Pemeriksaan</span><input class="input" id="cf-area" value="${esc(t['Area']||'')}"></label>
     <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="cf-kat">${katOpts}</select></label>
     <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="cf-desk" style="min-height:60px">${esc(t['Deskripsi']||'')}</textarea></label>
-    ${folderUrl?`<a href="${esc(folderUrl)}" target="_blank" class="btn btn-ghost btn-block btn-sm" style="margin-bottom:10px">Lihat Foto pada Drive</a>`:'<p class="hint">Tidak terdapat folder foto.</p>'}
+    ${folderUrl?`<a href="${esc(folderUrl)}" target="_blank" class="btn btn-ghost btn-block btn-sm" style="margin-bottom:10px">Lihat Seluruh Foto pada Drive</a>`:'<p class="hint">Tidak terdapat folder foto.</p>'}
     <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · TINDAK LANJUT</div>
     <label class="field"><span class="lbl">Penyebab (Root Cause)</span><select class="input" id="cf-penyebab">${penyebabOpts}</select></label>
     <label class="field"><span class="lbl">Saran Tindak Lanjut</span><textarea class="input" id="cf-saran" style="min-height:50px">${esc(t['Saran']||'')}</textarea></label>
@@ -1619,11 +2181,32 @@ function openCloudFinding(id){
       <option ${t['Status']==='Open'?'selected':''}>Open</option><option ${t['Status']==='Close'?'selected':''}>Close</option></select></label>
     <label class="field"><span class="lbl">Verifikator</span><input class="input" id="cf-verif" value="${esc(t['Verifikator']||'')}"></label>
     <button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Lihat Riwayat Perubahan Status</button>
+    <div id="cf-standar-btn">${adaFotoP?`<button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px" disabled>Memuat status foto standar…</button>`:''}</div>
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
       <button class="btn btn-primary" style="flex:1" onclick="saveCloudFinding('${esc(id)}')">Simpan ke Google</button>
     </div>
   </div></div>`;
+  if(adaFotoT||adaFotoP)loadCloudFindingPhotos(id,sudahStandar);
+}
+/* (P-perf) Fetch dataURL foto before/after untuk SATU temuan, terpisah dari listing utama */
+async function loadCloudFindingPhotos(id,sudahStandar){
+  try{
+    const res=await fetch(SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok)return;
+    const t=_cloudFindingById(id);
+    if(t){t['Foto Temuan (DataURL)']=out.foto||'';t['Foto Perbaikan (DataURL)']=out.fotoPerbaikan||'';}
+    const before=$('#cf-foto-before'),after=$('#cf-foto-after'),btnWrap=$('#cf-standar-btn');
+    if(before)before.outerHTML=out.foto?`<img id="cf-foto-before" src="${out.foto}" style="width:100%;border-radius:9px;border:1px solid var(--line);cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">`:`<div id="cf-foto-before" style="aspect-ratio:1;background:var(--concrete);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">Tidak ada</div>`;
+    if(after)after.outerHTML=out.fotoPerbaikan?`<img id="cf-foto-after" src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px;border:1px solid var(--line);cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">`:`<div id="cf-foto-after" style="aspect-ratio:1;background:var(--concrete);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">Belum ada</div>`;
+    if(btnWrap){
+      btnWrap.innerHTML=out.fotoPerbaikan?(sudahStandar
+        ?`<button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px;color:var(--red);border-color:#E6B0AA" onclick="unmarkAsStandard('${esc(id)}')">✕ Batalkan Status Foto Standar</button>`
+        :`<button class="btn btn-amber btn-block btn-sm" style="margin-bottom:8px" onclick="markAsStandard('${esc(id)}')">📌 Jadikan Foto Standar untuk Klausul Ini</button>`
+      ):'';
+    }
+  }catch(e){/* foto gagal dimuat — form tetap bisa diedit tanpa foto */}
 }
 async function lihatRiwayatStatus(findingId){
   toast('Sedang mengambil riwayat status…');
@@ -1668,6 +2251,160 @@ async function saveCloudFinding(id){
     }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
   }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
+/* (P6) Jadikan foto perbaikan (after) sebagai foto standar/acuan klausul — otomatis
+   menaikkan versi config sehingga seluruh asesor menerima notifikasi pembaruan formulir
+   (lewat checkRemoteConfig() yang sudah berjalan setiap kali aplikasi dibuka daring). */
+async function markAsStandard(id){
+  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
+  if(!confirm('Jadikan foto perbaikan (after) pada temuan ini sebagai foto standar/acuan untuk klausul yang sama? Foto ini akan tampil kepada seluruh asesor sebagai panduan penilaian berikutnya, dan formulir akan otomatis disinkronkan.'))return;
+  toast('Sedang memproses…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'markAsStandard',findingId:id})});
+    const out=await res.json();
+    if(out.ok){
+      const t=_cloudFindingById(id);if(t)t['Dijadikan Standar']='Ya';
+      // sinkronkan juga cache config lokal admin supaya konsisten dengan versi baru di server
+      if(out.configVersion)STORE.config.version=out.configVersion;
+      saveStore();
+      alert('BERHASIL\n\nFoto telah dijadikan standar untuk klausul '+esc(out.area||'')+' — '+esc(out.kategori||'')+'.\n\nSeluruh asesor akan menerima pembaruan foto acuan ini saat membuka aplikasi dalam keadaan daring belum tersinkron ke perangkat mereka.');
+      closeModal();renderDashboard();
+    }else alert('GAGAL menjadikan foto sebagai standar.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL memproses. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+/* (P-concern2) Batalkan status "Dijadikan Standar" — juga menghapus foto acuan
+   terkait dari config (kalau belum ditimpa foto standar lain sejak saat itu). */
+async function unmarkAsStandard(id){
+  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
+  if(!confirm('Batalkan status foto standar pada temuan ini? Foto acuan untuk klausul ini akan dihapus dan formulir akan otomatis disinkronkan ulang.'))return;
+  toast('Sedang memproses…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'unmarkAsStandard',findingId:id})});
+    const out=await res.json();
+    if(out.ok){
+      const t=_cloudFindingById(id);if(t)t['Dijadikan Standar']='Tidak';
+      if(out.configVersion)STORE.config.version=out.configVersion;
+      saveStore();
+      alert('BERHASIL\n\nStatus foto standar telah dibatalkan. Seluruh asesor akan menerima pembaruan ini saat aplikasi tersinkron berikutnya.');
+      closeModal();renderDashboard();
+    }else alert('GAGAL membatalkan status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL memproses. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+/* ===== (P-closing) TEMUAN SAYA — asesor menutup temuan miliknya sendiri =====
+   Beda dengan Monitoring Temuan (admin, semua temuan, field lengkap termasuk
+   Target/Penyebab), di sini asesor HANYA bisa mengubah temuan yang dia buat
+   sendiri (divalidasi di server via username), dan field yang bisa diubah
+   dibatasi: foto perbaikan (after), deskripsi tindak lanjut, tanggal, status. */
+let _myFindingsData=null;
+let MY_FINDING_FILTER='Open';
+function renderTemuanSaya(){
+  app().innerHTML=topbar('Temuan Saya','Tindak lanjut & closing temuan Anda')+`
+  <div class="wrap" id="mf-body"><div class="empty"><div class="ic">⏳</div>Memuat temuan Anda…</div></div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
+  loadMyFindings();
+}
+async function loadMyFindings(){
+  const b=$('#mf-body');if(!b)return;
+  const auth=getAuth();
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  if(!auth.username){b.innerHTML='<div class="empty">Sesi tidak valid — silakan keluar dan masuk kembali.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=myFindings&username='+encodeURIComponent(auth.username)+'&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    _myFindingsData=out.findings||[];
+    renderMyFindingsList();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadMyFindings()">Coba Lagi</button></div>`;}
+}
+function renderMyFindingsList(){
+  const b=$('#mf-body');if(!b)return;
+  let rows=_myFindingsData||[];
+  if(MY_FINDING_FILTER)rows=rows.filter(x=>(x['Status']||'Open')===MY_FINDING_FILTER);
+  b.innerHTML=`<div class="card">
+    <h2>Temuan yang Anda Buat</h2>
+    <p class="hint">Unggah foto perbaikan (after) dan tandai selesai untuk temuan yang sudah ditindaklanjuti di lapangan.</p>
+    <div class="seg" style="background:var(--concrete);margin:0">
+      <button class="${MY_FINDING_FILTER==='Open'?'on':''}" style="color:${MY_FINDING_FILTER==='Open'?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER==='Open'?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='Open';renderMyFindingsList()">Terbuka</button>
+      <button class="${MY_FINDING_FILTER==='Close'?'on':''}" style="color:${MY_FINDING_FILTER==='Close'?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER==='Close'?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='Close';renderMyFindingsList()">Selesai</button>
+      <button class="${MY_FINDING_FILTER===''?'on':''}" style="color:${MY_FINDING_FILTER===''?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER===''?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='';renderMyFindingsList()">Semua</button>
+    </div>
+  </div>
+  ${rows.length?rows.map(x=>myFindingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak ada temuan pada kategori ini.</div>'}`;
+  rows.forEach(x=>{if(x['_adaFotoPerbaikan'])_loadMyFindingPhotoIfAny(x['ID Temuan']);});
+}
+function myFindingRow(x){
+  const id=x['ID Temuan'];
+  const stColor=x['Status']==='Close'?'var(--green-400)':'var(--red)';
+  const adaFotoP=!!x['_adaFotoPerbaikan'];
+  return `<div class="card" style="padding:14px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+      <span class="tag5r t-${x['Kategori']}">${(x['Kategori']||'').toUpperCase()}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(x['Status']||'Open')}</span>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')} · ${esc(x['Area']||'')}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['Deskripsi']||'')}</div>
+    <div class="finding" style="margin:0 0 10px">
+      <div class="finding-lbl">Foto Perbaikan (After)</div>
+      <div class="photo-row" id="mf-photo-${id}">
+        ${adaFotoP?`<img class="photo-thumb" id="mf-img-${id}" src="" data-loaded="0" onclick="zoomFotoAcuan(this.src)">`:`<label class="photo-add"><span id="mf-plus-${id}">+</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="addMyFindingPhoto('${esc(id)}',this)"></label>`}
+      </div>
+    </div>
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="mf-deskp-${id}" style="min-height:44px">${esc(x['Deskripsi Perbaikan']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="mf-tglp-${id}" type="date" value="${esc((x['Tgl Perbaikan']||'').slice(0,10))}"></label>
+    <label class="field"><span class="lbl">Status</span><select class="input" id="mf-status-${id}">
+      <option ${x['Status']==='Open'?'selected':''}>Open</option><option ${x['Status']==='Close'?'selected':''}>Close</option></select></label>
+    <button class="btn btn-primary btn-block btn-sm" onclick="saveMyFinding('${esc(id)}')">Simpan</button>
+  </div>`;
+}
+/* Muat foto perbaikan yang sudah ada (kalau ada) secara on-demand, sama pola dengan Dashboard Cloud */
+async function _loadMyFindingPhotoIfAny(id){
+  const img=document.getElementById('mf-img-'+id);
+  if(!img||img.dataset.loaded==='1')return;
+  try{
+    const res=await fetch(SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(out.ok&&out.fotoPerbaikan){img.src=out.fotoPerbaikan;img.dataset.loaded='1';}
+  }catch(e){/* diam saja — asesor masih bisa upload foto baru walau gagal memuat yang lama */}
+}
+function addMyFindingPhoto(id,inp){
+  const f=inp.files[0];if(!f)return;
+  handlePhoto(f,url=>{
+    window._myFindingPhoto=window._myFindingPhoto||{};
+    window._myFindingPhoto[id]=url;
+    const row=$('#mf-photo-'+id);
+    row.innerHTML=`<img class="photo-thumb" src="${url}" onclick="zoomFotoAcuan(this.src)">`;
+    toast('Foto siap — ketuk Simpan untuk mengirim');
+  });
+}
+async function saveMyFinding(id){
+  const auth=getAuth();
+  const fields={
+    'Deskripsi Perbaikan':$('#mf-deskp-'+id).value.trim(),
+    'Tgl Perbaikan':$('#mf-tglp-'+id).value,
+    'Status':$('#mf-status-'+id).value,
+    'Verifikator':auth.name||''
+  };
+  if(window._myFindingPhoto&&window._myFindingPhoto[id]){
+    fields['Foto Perbaikan (DataURL)']=window._myFindingPhoto[id];
+  }
+  if(fields['Status']==='Close'&&!fields['Deskripsi Perbaikan']){
+    toast('⚠️ Mohon isi deskripsi tindak lanjut sebelum menandai selesai');
+    return;
+  }
+  toast('Sedang menyimpan…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'updateMyFinding',findingId:id,username:auth.username,fields})});
+    const out=await res.json();
+    if(out.ok){
+      const t=(_myFindingsData||[]).find(x=>x['ID Temuan']===id);
+      if(t)Object.assign(t,fields);
+      toast('Tersimpan');loadMyFindings();
+    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+
 function renderDashboard(){
   const auth=getAuth();
   let F=allFindings();
