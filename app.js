@@ -14,7 +14,7 @@ const ADMIN_PASS='admin5r';
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbxGrxZH9wi05uOgvdR7ckQ0qqKV9SkyREAyftq83ISEtoQ8O4Pp_5NYI6WnzN_tXCZRXg/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
@@ -166,7 +166,12 @@ function handlePhotoStandar(file,cb){
 function fotoStandarUsage(){
   const fs=STORE.config.fotoStandar||{};
   let bytes=0;
-  Object.keys(fs).forEach(areaId=>Object.keys(fs[areaId]).forEach(asp=>{bytes+=(fs[areaId][asp]||'').length;}));
+  Object.keys(fs).forEach(areaId=>Object.keys(fs[areaId]).forEach(asp=>{
+    const perPU=fs[areaId][asp]||{};
+    Object.keys(perPU).forEach(pu=>{
+      (perPU[pu]||[]).forEach(g=>{bytes+=((g&&g.url)||'').length;});
+    });
+  }));
   return bytes;
 }
 /* perkiraan sisa storage: localStorage limit ~5MB. Cek pemakaian sekarang. */
@@ -510,7 +515,7 @@ function startAssess(){
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
   DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,asesorUsername:getAuth().username||'',date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
-    areas:areaIds,answers:{},interviewVals:{},photos:{},notes:{},curArea:0};
+    areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},curArea:0};
   VIEW='assess';render();
 }
 function openSession(id){
@@ -607,11 +612,25 @@ function renderAssessBody(){
     html+=`<div class="aspect"><div class="aspect-head">
       <span class="tag5r t-${asp}">${asp.toUpperCase()}</span>
       <span class="aspect-score">${anyAns?'Nilai '+aspectScore(yes):''}</span></div>`;
-    // (P4) foto standar/acuan — ditampilkan sebelum klausul aspek ini sebagai panduan asesor
-    const fotoAcuan=fotoStandarFor(areaId,asp);
-    if(fotoAcuan){
-      html+=`<div style="margin-bottom:10px"><img src="${fotoAcuan}" style="width:100%;max-width:220px;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">
-        <div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:4px">📷 Foto Acuan/Standar — ${asp}</div></div>`;
+    // (P-galeri) Galeri foto standar/acuan PU ini — ditampilkan sebagai carousel
+    // (bukan 1 foto statis) sebelum klausul aspek ini sebagai panduan asesor
+    const galeriAcuan=fotoStandarGaleriFor(areaId,asp,d.pu);
+    if(galeriAcuan.length){
+      const gkey=`${areaId}_${asp}`.replace(/[^\w]/g,'_');
+      if(!window._galeriIdx)window._galeriIdx={};
+      if(window._galeriIdx[gkey]==null)window._galeriIdx[gkey]=0;
+      const idx=Math.min(window._galeriIdx[gkey],galeriAcuan.length-1);
+      const foto=galeriAcuan[idx];
+      html+=`<div style="margin-bottom:10px">
+        <div style="position:relative;max-width:220px">
+          <img src="${foto.url}" style="width:100%;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">
+          ${galeriAcuan.length>1?`
+          <button onclick="galeriNav('${gkey}',-1,${galeriAcuan.length})" style="position:absolute;left:4px;top:50%;transform:translateY(-50%);background:rgba(11,61,46,.75);color:#fff;border-radius:50%;width:28px;height:28px;font-weight:800">‹</button>
+          <button onclick="galeriNav('${gkey}',1,${galeriAcuan.length})" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(11,61,46,.75);color:#fff;border-radius:50%;width:28px;height:28px;font-weight:800">›</button>
+          <div style="position:absolute;bottom:4px;right:6px;background:rgba(11,61,46,.75);color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px">${idx+1}/${galeriAcuan.length}</div>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);font-weight:700;margin-top:4px">📷 Foto Acuan/Standar — ${asp} (${esc(d.pu)})</div>
+      </div>`;
     }
     krit.forEach((q,i)=>{
       const key=`${areaId}|${asp}|${i}`;const v=d.answers[key];
@@ -621,23 +640,33 @@ function renderAssessBody(){
           <button class="tidak ${v==='tidak'?'on':''}" onclick="setAns('${key}','tidak')"><span class="ic">✕</span>Tidak</button>
         </div></div>`;
     });
-    // photo (WAJIB min 1) + temuan (WAJIB jika ada klausul "tidak") — dipisah, blok masing-masing (P2)
+    // (P-galeri) Foto Good Condition (dulu "Dokumentasi Foto", WAJIB min 1) +
+    // Foto Temuan/Not Good (BARU, berpasangan dengan Keterangan Temuan, wajib
+    // jika ada klausul "Tidak") — dipisah, blok masing-masing
     const akey=`${areaId}|${asp}`;
-    const photos=d.photos[akey]||[];
+    const photosGood=d.photos[akey]||[];
+    d.photosTemuan=d.photosTemuan||{};
+    const photosTemuan=d.photosTemuan[akey]||[];
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const notePenuh=(d.notes[akey]||'').trim().length>0;
-    const fotoKurang=photos.length<1;
+    const fotoKurang=photosGood.length<1;
     const notePerlu=adaTidak&&!notePenuh;
     html+=`<div class="finding" id="photo-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="foto">
-      <div class="finding-lbl">Dokumentasi Foto — ${asp} <span style="color:${fotoKurang?'var(--red)':'var(--muted)'};font-weight:700">(${photos.length}/5${fotoKurang?' · wajib minimal 1':''})</span></div>
+      <div class="finding-lbl">Foto Good Condition — ${asp} <span style="color:${fotoKurang?'var(--red)':'var(--muted)'};font-weight:700">(${photosGood.length}/5${fotoKurang?' · wajib minimal 1':''})</span></div>
+      <p class="hint" style="margin:2px 0 8px">Dokumentasikan kondisi sesuai standar. Foto ini dapat masuk galeri acuan Foto Standar untuk PU Anda.</p>
       <div class="photo-row">
-        ${photos.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
-        ${photos.length<5?`<label class="photo-add" style="${fotoKurang?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
+        ${photosGood.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
+        ${photosGood.length<5?`<label class="photo-add" style="${fotoKurang?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
       </div>
     </div>`;
     html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${notePerlu?'border-color:var(--red)':''}">
       <div class="finding-lbl">Keterangan Temuan — ${asp} ${adaTidak?`<span style="color:${notePerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib diisi — terdapat klausul "Tidak")</span>`:'<span style="color:var(--muted);font-weight:400">(opsional)</span>'}</div>
       <textarea class="note-input" style="${notePerlu?'border-color:var(--red)':''}" placeholder="Jelaskan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
+      <div class="finding-lbl" style="margin-top:10px">Foto Temuan / Not Good <span style="color:var(--muted);font-weight:400">(${photosTemuan.length}/5 · opsional)</span></div>
+      <div class="photo-row">
+        ${photosTemuan.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhotoTemuan('${akey}',${i})">`).join('')}
+        ${photosTemuan.length<5?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
+      </div>
     </div>`;
     html+=`</div>`;
   });
@@ -741,6 +770,9 @@ function addAreaToSession(areaId){
 }
 function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
 function rmPhoto(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
+/* (P-galeri) Foto Temuan/Not Good — field terpisah dari Foto Good Condition, disimpan di DRAFT.photosTemuan */
+function addPhotoTemuan(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;DRAFT.photosTemuan=DRAFT.photosTemuan||{};if((DRAFT.photosTemuan[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}handlePhoto(f,url=>{(DRAFT.photosTemuan[areaId]=DRAFT.photosTemuan[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function rmPhotoTemuan(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photosTemuan[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
 /* ---------- Auto-save draft ---------- */
 const DRAFT_KEY='asesmen5r_draft';
@@ -1209,24 +1241,54 @@ function delLoc(loc){if(!confirm('Hapus Lokasi '+loc+'?'))return;delete STORE.co
 /* ===== (P4) FOTO STANDAR / ACUAN per Area + Aspek =====
    Disimpan di STORE.config.fotoStandar = { [areaId]: { [aspek]: dataUrl } }
    Disebarkan ke seluruh asesor lewat mekanisme pushConfig() yang sudah ada. */
-function fotoStandarFor(areaId,asp){
+/* (P-galeri) Struktur baru: fotoStandar[areaId][aspek][pu] = [ {url, source, sourceLabel, tanggal}, ... maks 3 ]
+   Mengembalikan array foto (bisa kosong) untuk PU spesifik yang sedang di-assess. */
+function fotoStandarGaleriFor(areaId,asp,pu){
   const fs=STORE.config.fotoStandar||{};
-  return (fs[areaId]&&fs[areaId][asp])||'';
+  return (fs[areaId]&&fs[areaId][asp]&&fs[areaId][asp][pu])||[];
+}
+function galeriNav(gkey,dir,total){
+  if(!window._galeriIdx)window._galeriIdx={};
+  let idx=(window._galeriIdx[gkey]||0)+dir;
+  if(idx<0)idx=total-1;
+  if(idx>=total)idx=0;
+  window._galeriIdx[gkey]=idx;
+  renderAssessBody();
 }
 function zoomFotoAcuan(src){
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="closeModal()" style="align-items:center">
     <img src="${src}" style="max-width:92vw;max-height:85vh;border-radius:12px" onclick="event.stopPropagation()">
   </div>`;
 }
+/* ===== (P-galeri) GALERI FOTO STANDAR PER-PU =====
+   Berbeda dari tab admin lain, di sini upload/hapus foto LANGSUNG memanggil
+   server (bukan menyimpan ke STORE.config._dirty dulu) — karena logic FIFO
+   (galeri maks 3 foto per PU) dijalankan di backend agar konsisten meski
+   beberapa admin/asesor menambah foto bersamaan dari device berbeda. */
 function admFotoStandar(){
   if(!window._fsArea)window._fsArea=STORE.config.areaChecks[0]?.id;
+  if(!window._fsPU)window._fsPU=Object.keys(STORE.config.matrix)[0];
   const area=STORE.config.areaChecks.find(a=>a.id===window._fsArea);
   const fsKB=(fotoStandarUsage()/1024).toFixed(0);
+  const notifBelumDibaca=(STORE.config.fotoStandarNotif||[]).filter(n=>!n.dibaca);
   return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2>
-    <p class="hint">Kelola foto acuan yang akan tampil kepada asesor sebagai panduan penilaian sebelum mengisi klausul aspek terkait. Foto ini juga dapat ditarik otomatis dari foto tindak lanjut (after) pada temuan yang telah ditutup — lihat Dashboard Temuan.</p>
-    <p class="hint" style="margin-bottom:0">Total ukuran foto standar saat ini: <b>~${fsKB} KB</b> — ikut tersebar ke penyimpanan setiap asesor saat formulir disinkronkan, jadi disarankan tidak berlebihan.</p>
+    <p class="hint">Kelola galeri foto acuan (maksimal 3 foto per Production Unit per aspek) yang akan tampil kepada asesor sebagai carousel panduan penilaian. Foto standar ini BERBEDA untuk setiap PU — misalnya foto 5R Board PUJ dapat berbeda dari PUC atau PUG.</p>
+    <p class="hint" style="margin-bottom:0">Perkiraan ukuran total: <b>~${fsKB} KB</b> — ikut tersebar ke penyimpanan setiap asesor saat formulir disinkronkan.</p>
     </div>
+    ${notifBelumDibaca.length?`<div class="card" style="background:#FFF8EA;border:2px solid var(--amber)">
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px">
+        <span style="font-size:20px">🔔</span>
+        <div><div style="font-weight:800;font-size:14px;color:#9A6B00;margin-bottom:6px">${notifBelumDibaca.length} Foto Standar Otomatis Tergantikan (FIFO)</div>
+        ${notifBelumDibaca.slice(-5).map(n=>`<div style="font-size:12px;color:var(--muted);margin-bottom:4px">• ${esc(n.pesan)}</div>`).join('')}
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="markGaleriNotifDibaca()">Tandai Sudah Dibaca</button>
+    </div>`:''}
     <div class="card">
+    <label class="field" style="margin-bottom:10px"><span class="lbl">Production Unit</span>
+      <select class="input" onchange="window._fsPU=this.value;renderAdmin()">
+        ${Object.keys(STORE.config.matrix).map(pu=>`<option ${pu===window._fsPU?'selected':''}>${esc(pu)}</option>`).join('')}
+      </select></label>
     <label class="field" style="margin:0"><span class="lbl">Area Pemeriksaan</span>
       <select class="input" onchange="window._fsArea=this.value;renderAdmin()">
         ${STORE.config.areaChecks.map(a=>`<option value="${a.id}" ${a.id===window._fsArea?'selected':''}>${esc(a.name)}</option>`).join('')}
@@ -1234,31 +1296,67 @@ function admFotoStandar(){
     </div>
     ${area?ASPECTS.map(asp=>{
       if(!area.aspects[asp]||!area.aspects[asp].length)return '';
-      const foto=fotoStandarFor(area.id,asp);
+      const galeri=fotoStandarGaleriFor(area.id,asp,window._fsPU);
       return `<div class="card">
-        <div class="aspect-head"><span class="tag5r t-${asp}">${asp.toUpperCase()}</span></div>
+        <div class="aspect-head"><span class="tag5r t-${asp}">${asp.toUpperCase()}</span>
+          <span class="aspect-score" style="font-size:12px">${galeri.length}/3</span></div>
         <div class="photo-row">
-          ${foto?`<img src="${foto}" class="photo-thumb" style="width:100px;height:100px" onclick="rmFotoStandar('${area.id}','${asp}')">`
-                :`<label class="photo-add" style="width:100px;height:100px">+<input type="file" accept="image/*" style="display:none" onchange="addFotoStandar('${area.id}','${asp}',this)"></label>`}
+          ${galeri.map(g=>`<div style="position:relative"><img src="${g.url}" class="photo-thumb" style="width:90px;height:90px" onclick="zoomFotoAcuan('${g.url}')">
+            <button onclick="event.stopPropagation();deleteGaleriFoto('${area.id}','${asp}','${esc(window._fsPU)}','${g.url.replace(/'/g,"\\'")}')" style="position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;font-weight:800;line-height:1">✕</button>
+            <div style="position:absolute;bottom:2px;left:2px;right:2px;background:rgba(11,61,46,.75);color:#fff;font-size:8px;padding:1px 4px;border-radius:4px;text-align:center">${g.source==='admin'?'Manual':g.source==='temuan'?'Temuan':'Asesmen'}</div>
+          </div>`).join('')}
+          ${galeri.length<3?`<label class="photo-add" style="width:90px;height:90px">+<input type="file" accept="image/*" style="display:none" onchange="addFotoStandar('${area.id}','${asp}',this)"></label>`:''}
         </div>
-        <p class="hint" style="margin-top:6px;margin-bottom:0">${foto?'Ketuk foto untuk menghapus.':'Belum ada foto acuan untuk aspek ini.'}</p>
+        <p class="hint" style="margin-top:6px;margin-bottom:0">${galeri.length>=3?'Galeri penuh (maks 3). Hapus salah satu foto untuk menambah yang baru — atau biarkan, sistem akan otomatis menggantikan foto terlama saat foto baru masuk dari asesmen/closing temuan.':'Ketuk ✕ pada foto untuk menghapus.'}</p>
       </div>`;
-    }).join(''):''}
-    ${syncConfigBtn()}`;
+    }).join(''):''}`;
 }
-function addFotoStandar(areaId,asp,inp){
+async function addFotoStandar(areaId,asp,inp){
   const f=inp.files[0];if(!f)return;
-  handlePhotoStandar(f,url=>{
-    STORE.config.fotoStandar=STORE.config.fotoStandar||{};
-    STORE.config.fotoStandar[areaId]=STORE.config.fotoStandar[areaId]||{};
-    STORE.config.fotoStandar[areaId][asp]=url;
-    STORE.config._dirty=true;saveStore();renderAdmin();toast('Foto standar telah disimpan');
+  const pu=window._fsPU;
+  handlePhotoStandar(f,async url=>{
+    toast('Mengunggah…');
+    try{
+      const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify({secret:SYNC_SECRET,type:'uploadGaleriFoto',areaId,aspek:asp,pu,dataUrl:url})});
+      const out=await res.json();
+      if(out.ok){
+        STORE.config.fotoStandar=STORE.config.fotoStandar||{};
+        STORE.config.fotoStandar[areaId]=STORE.config.fotoStandar[areaId]||{};
+        STORE.config.fotoStandar[areaId][asp]=STORE.config.fotoStandar[areaId][asp]||{};
+        const galeri=STORE.config.fotoStandar[areaId][asp][pu]||[];
+        if(galeri.length>=3)galeri.shift();
+        galeri.push({url,source:'admin',sourceLabel:'unggahan manual admin',tanggal:new Date().toISOString()});
+        STORE.config.fotoStandar[areaId][asp][pu]=galeri;
+        STORE.config.version=out.configVersion||STORE.config.version;
+        saveStore();renderAdmin();toast('Foto standar telah disimpan');
+      }else alert('GAGAL mengunggah.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+    }catch(e){alert('GAGAL mengunggah. Mohon periksa sinyal.\n\nRincian: '+e.message);}
   });
 }
-function rmFotoStandar(areaId,asp){
-  if(!confirm('Hapus foto standar untuk aspek ini?'))return;
-  if(STORE.config.fotoStandar&&STORE.config.fotoStandar[areaId])delete STORE.config.fotoStandar[areaId][asp];
-  STORE.config._dirty=true;saveStore();renderAdmin();toast('Foto standar telah dihapus');
+async function deleteGaleriFoto(areaId,asp,pu,url){
+  if(!confirm('Hapus foto standar ini dari galeri?'))return;
+  toast('Menghapus…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'deleteGaleriFoto',areaId,aspek:asp,pu,url})});
+    const out=await res.json();
+    if(out.ok){
+      const galeri=(STORE.config.fotoStandar[areaId]&&STORE.config.fotoStandar[areaId][asp]&&STORE.config.fotoStandar[areaId][asp][pu])||[];
+      const idx=galeri.findIndex(g=>g.url===url);
+      if(idx>-1)galeri.splice(idx,1);
+      STORE.config.version=out.configVersion||STORE.config.version;
+      saveStore();renderAdmin();toast('Foto standar telah dihapus');
+    }else alert('GAGAL menghapus.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menghapus. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+async function markGaleriNotifDibaca(){
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'markGaleriNotifDibaca'})});
+    const out=await res.json();
+    if(out.ok){(STORE.config.fotoStandarNotif||[]).forEach(n=>n.dibaca=true);saveStore();renderAdmin();}
+  }catch(e){toast('Gagal menandai notifikasi. Coba lagi nanti.');}
 }
 
 /* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
@@ -2202,8 +2300,8 @@ async function loadCloudFindingPhotos(id,sudahStandar){
     if(after)after.outerHTML=out.fotoPerbaikan?`<img id="cf-foto-after" src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px;border:1px solid var(--line);cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">`:`<div id="cf-foto-after" style="aspect-ratio:1;background:var(--concrete);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px">Belum ada</div>`;
     if(btnWrap){
       btnWrap.innerHTML=out.fotoPerbaikan?(sudahStandar
-        ?`<button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px;color:var(--red);border-color:#E6B0AA" onclick="unmarkAsStandard('${esc(id)}')">✕ Batalkan Status Foto Standar</button>`
-        :`<button class="btn btn-amber btn-block btn-sm" style="margin-bottom:8px" onclick="markAsStandard('${esc(id)}')">📌 Jadikan Foto Standar untuk Klausul Ini</button>`
+        ?`<button class="btn btn-ghost btn-block btn-sm" style="margin-bottom:8px;color:var(--red);border-color:#E6B0AA" onclick="unmarkAsStandard('${esc(id)}')">✕ Keluarkan dari Galeri Standar</button>`
+        :`<button class="btn btn-amber btn-block btn-sm" style="margin-bottom:8px" onclick="markAsStandard('${esc(id)}')">📌 Tambahkan ke Galeri Foto Standar</button>`
       ):'';
     }
   }catch(e){/* foto gagal dimuat — form tetap bisa diedit tanpa foto */}
@@ -2256,7 +2354,7 @@ async function saveCloudFinding(id){
    (lewat checkRemoteConfig() yang sudah berjalan setiap kali aplikasi dibuka daring). */
 async function markAsStandard(id){
   if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
-  if(!confirm('Jadikan foto perbaikan (after) pada temuan ini sebagai foto standar/acuan untuk klausul yang sama? Foto ini akan tampil kepada seluruh asesor sebagai panduan penilaian berikutnya, dan formulir akan otomatis disinkronkan.'))return;
+  if(!confirm('Tambahkan foto perbaikan (after) pada temuan ini ke galeri foto standar/acuan untuk PU dan klausul yang sama? Foto akan tampil kepada asesor PU tersebut sebagai panduan penilaian berikutnya. Apabila galeri sudah berisi 3 foto, foto TERLAMA akan otomatis digantikan.'))return;
   toast('Sedang memproses…');
   try{
     const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
@@ -2267,7 +2365,7 @@ async function markAsStandard(id){
       // sinkronkan juga cache config lokal admin supaya konsisten dengan versi baru di server
       if(out.configVersion)STORE.config.version=out.configVersion;
       saveStore();
-      alert('BERHASIL\n\nFoto telah dijadikan standar untuk klausul '+esc(out.area||'')+' — '+esc(out.kategori||'')+'.\n\nSeluruh asesor akan menerima pembaruan foto acuan ini saat membuka aplikasi dalam keadaan daring belum tersinkron ke perangkat mereka.');
+      alert('BERHASIL\n\nFoto telah ditambahkan ke galeri standar untuk '+esc(out.pu||'')+' — '+esc(out.area||'')+' — '+esc(out.kategori||'')+'.'+(out.evicted?'\n\nFoto terlama pada galeri PU ini telah digantikan (galeri sudah penuh).':'')+'\n\nAsesor PU tersebut akan menerima pembaruan foto acuan ini saat aplikasi tersinkron berikutnya.');
       closeModal();renderDashboard();
     }else alert('GAGAL menjadikan foto sebagai standar.\n\nPenyebab: '+(out.error||'tidak diketahui'));
   }catch(e){alert('GAGAL memproses. Mohon periksa sinyal.\n\nRincian: '+e.message);}
