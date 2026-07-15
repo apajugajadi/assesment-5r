@@ -14,7 +14,7 @@ const ADMIN_PASS='admin5r';
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbxGrxZH9wi05uOgvdR7ckQ0qqKV9SkyREAyftq83ISEtoQ8O4Pp_5NYI6WnzN_tXCZRXg/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
@@ -124,6 +124,125 @@ function draftProgress(draft){
 }
 
 /* ---------- Photo handling (kompres agresif biar hemat storage) ---------- */
+/* ===== (P-cropper) CROP FOTO WAJIB SEBELUM DIUNGGAH =====
+   Setiap kali pengguna memilih foto (dari kamera atau galeri), foto tidak langsung
+   dikompres — ditampilkan dulu dalam modal crop dengan bingkai rasio 4:3 terkunci
+   (mengikuti proporsi tampilan Foto Acuan/Standar pada layar assess), agar pengguna
+   dapat memastikan bagian foto yang relevan tidak terpotong akibat perbedaan rasio
+   kamera antar perangkat. Proses ini WAJIB — tidak ada opsi "Lewati".
+   Setelah dikonfirmasi, hasil crop diteruskan ke callback yang sama seperti sebelumnya
+   (handlePhoto / handlePhotoStandar) sehingga kompresi & penyimpanan tetap konsisten. */
+const CROP_RATIO = 4/3; // lebar:tinggi
+let _cropState = null;
+function openCropper(file, onCropped){
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      _cropState = { img, scale: 1, minScale: 1, offX: 0, offY: 0, onCropped, dragging:false, lastX:0, lastY:0 };
+      renderCropperModal();
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+/* Cropper dirender ke container TERPISAH (#cropper-root, dibuat otomatis kalau belum
+   ada) — BUKAN ke #modal-root — supaya bisa tampil DI ATAS modal lain yang sedang
+   terbuka (misal modal Tambah/Ubah Temuan) tanpa menghapus/menimpa modal tersebut. */
+function _cropperRoot(){
+  let el = document.getElementById('cropper-root');
+  if(!el){ el = document.createElement('div'); el.id='cropper-root'; document.body.appendChild(el); }
+  return el;
+}
+function renderCropperModal(){
+  const cs = _cropState; if(!cs) return;
+  // Ukuran bingkai crop di layar (CSS px), rasio 4:3 tetap, lebar menyesuaikan viewport
+  const frameW = Math.min(360, window.innerWidth - 48);
+  const frameH = frameW / CROP_RATIO;
+  // Skala minimum: gambar harus menutupi seluruh bingkai (object-fit: cover)
+  const s = Math.max(frameW / cs.img.width, frameH / cs.img.height);
+  cs.minScale = s;
+  if(cs.scale < s) cs.scale = s;
+  cs.frameW = frameW; cs.frameH = frameH;
+  _cropperRoot().innerHTML = `<div class="modal-bg" style="align-items:center;z-index:300">
+    <div class="modal" style="max-width:${frameW+40}px;text-align:center">
+      <h3 style="margin-bottom:4px">Atur Bagian Foto</h3>
+      <p class="hint" style="margin-bottom:12px">Geser untuk memposisikan, gunakan penggeser untuk memperbesar. Bingkai hijau adalah bagian foto yang akan disimpan.</p>
+      <div id="crop-frame" style="position:relative;width:${frameW}px;height:${frameH}px;margin:0 auto;overflow:hidden;border-radius:10px;border:3px solid var(--lime);background:#111;touch-action:none;cursor:grab">
+        <img id="crop-img" src="${cs.img.src}" style="position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;pointer-events:none">
+      </div>
+      <input id="crop-zoom" type="range" min="0" max="100" style="width:100%;margin-top:14px" oninput="cropZoom(this.value)">
+      <div style="display:flex;gap:10px;margin-top:14px">
+        <button class="btn btn-ghost" style="flex:1" onclick="cancelCropper()">Batalkan</button>
+        <button class="btn btn-primary" style="flex:1" onclick="confirmCropper()">Gunakan Foto Ini</button>
+      </div>
+    </div>
+  </div>`;
+  // posisi awal: tengah
+  cs.offX = (frameW - cs.img.width*cs.scale)/2;
+  cs.offY = (frameH - cs.img.height*cs.scale)/2;
+  updateCropTransform();
+  const zoomRange = $('#crop-zoom');
+  const maxScale = cs.minScale*3;
+  zoomRange.value = Math.round(((cs.scale-cs.minScale)/(maxScale-cs.minScale))*100);
+  attachCropDragHandlers();
+}
+function updateCropTransform(){
+  const cs=_cropState; if(!cs) return;
+  // clamp supaya bingkai selalu tertutup gambar
+  const w=cs.img.width*cs.scale, h=cs.img.height*cs.scale;
+  cs.offX = Math.min(0, Math.max(cs.frameW-w, cs.offX));
+  cs.offY = Math.min(0, Math.max(cs.frameH-h, cs.offY));
+  const el=$('#crop-img');
+  if(el) el.style.transform = `translate(${cs.offX}px,${cs.offY}px) scale(${cs.scale})`;
+}
+function cropZoom(val){
+  const cs=_cropState; if(!cs) return;
+  const maxScale = cs.minScale*3;
+  const newScale = cs.minScale + (maxScale-cs.minScale)*(val/100);
+  // zoom terpusat ke tengah bingkai
+  const cx=cs.frameW/2, cy=cs.frameH/2;
+  const relX=(cx-cs.offX)/cs.scale, relY=(cy-cs.offY)/cs.scale;
+  cs.scale=newScale;
+  cs.offX=cx-relX*cs.scale; cs.offY=cy-relY*cs.scale;
+  updateCropTransform();
+}
+function attachCropDragHandlers(){
+  const frame=$('#crop-frame'); const cs=_cropState; if(!frame||!cs) return;
+  const start=(x,y)=>{cs.dragging=true;cs.lastX=x;cs.lastY=y;frame.style.cursor='grabbing';};
+  const move=(x,y)=>{
+    if(!cs.dragging) return;
+    cs.offX += x-cs.lastX; cs.offY += y-cs.lastY;
+    cs.lastX=x; cs.lastY=y;
+    updateCropTransform();
+  };
+  const end=()=>{cs.dragging=false;frame.style.cursor='grab';};
+  frame.onmousedown=e=>start(e.clientX,e.clientY);
+  window.addEventListener('mousemove',e=>move(e.clientX,e.clientY));
+  window.addEventListener('mouseup',end);
+  frame.ontouchstart=e=>{const t=e.touches[0];start(t.clientX,t.clientY);};
+  frame.ontouchmove=e=>{const t=e.touches[0];move(t.clientX,t.clientY);e.preventDefault();};
+  frame.ontouchend=end;
+}
+function closeCropper(){_cropperRoot().innerHTML='';}
+function cancelCropper(){_cropState=null;closeCropper();}
+function confirmCropper(){
+  const cs=_cropState; if(!cs) return;
+  // Render hasil crop ke canvas beresolusi tetap (960x720, rasio 4:3) sebelum
+  // diteruskan ke callback (yang akan mengompresnya lebih lanjut sesuai konteks).
+  const outW=960, outH=outW/CROP_RATIO;
+  const cv=document.createElement('canvas'); cv.width=outW; cv.height=outH;
+  const ctx=cv.getContext('2d');
+  // faktor skala dari koordinat layar crop ke koordinat canvas output
+  const k = outW/cs.frameW;
+  ctx.drawImage(cs.img, cs.offX*k, cs.offY*k, cs.img.width*cs.scale*k, cs.img.height*cs.scale*k);
+  cv.toBlob(blob=>{
+    const croppedFile = new File([blob], 'cropped.jpg', {type:'image/jpeg'});
+    const cb=cs.onCropped;
+    _cropState=null; closeCropper();
+    cb(croppedFile);
+  }, 'image/jpeg', 0.9);
+}
 function handlePhoto(file,cb){
   if(!storageOK()){toast('Penyimpanan hampir penuh — mohon lakukan pencadangan dan hapus data lama terlebih dahulu');return;}
   const reader=new FileReader();
@@ -768,10 +887,10 @@ function addAreaToSession(areaId){
   DRAFT.curArea=DRAFT.areas.length; // step = area index(N-1)+1 = N, jump ke area baru
   saveDraftLite();closeModal();renderAssess();toast('Area telah ditambahkan');
 }
-function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}handlePhoto(f,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function addPhoto(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;if((DRAFT.photos[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}inp.value='';openCropper(f,cropped=>{handlePhoto(cropped,url=>{(DRAFT.photos[areaId]=DRAFT.photos[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});});}
 function rmPhoto(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photos[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 /* (P-galeri) Foto Temuan/Not Good — field terpisah dari Foto Good Condition, disimpan di DRAFT.photosTemuan */
-function addPhotoTemuan(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;DRAFT.photosTemuan=DRAFT.photosTemuan||{};if((DRAFT.photosTemuan[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}handlePhoto(f,url=>{(DRAFT.photosTemuan[areaId]=DRAFT.photosTemuan[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});}
+function addPhotoTemuan(areaId,inp){if(isLocked())return lockBlock();const f=inp.files[0];if(!f)return;DRAFT.photosTemuan=DRAFT.photosTemuan||{};if((DRAFT.photosTemuan[areaId]||[]).length>=5){toast('Maksimal 5 foto untuk setiap aspek');return;}inp.value='';openCropper(f,cropped=>{handlePhoto(cropped,url=>{(DRAFT.photosTemuan[areaId]=DRAFT.photosTemuan[areaId]||[]).push(url);saveDraftLite();renderAssessBody();});});}
 function rmPhotoTemuan(areaId,i){if(isLocked())return lockBlock();if(confirm('Hapus foto ini?')){DRAFT.photosTemuan[areaId].splice(i,1);saveDraftLite();renderAssessBody();}}
 
 /* ---------- Auto-save draft ---------- */
@@ -1043,8 +1162,11 @@ function exitReportWithoutSync(){
 function toggleDNDetail(pi){
   const row=document.getElementById('dn-detail-'+pi),caret=document.getElementById('dn-caret-'+pi);
   if(!row)return;
-  const open=row.classList.toggle('hidden');
-  if(caret)caret.textContent=open?'▸':'▾';
+  // classList.toggle('hidden') mengembalikan TRUE kalau class 'hidden' DITAMBAHKAN
+  // (artinya baris baru saja DISEMBUNYIKAN) — bukan kalau baris jadi terbuka.
+  // 'nowHidden' dinamai sesuai artinya yang sebenarnya supaya tidak lagi tertukar.
+  const nowHidden=row.classList.toggle('hidden');
+  if(caret)caret.textContent=nowHidden?'▸':'▾';
 }
 function toggleDetail(ri){
   const row=document.getElementById('detail-'+ri),caret=document.getElementById('caret-'+ri);
@@ -1328,7 +1450,9 @@ function admFotoStandar(){
 async function addFotoStandar(areaId,asp,inp){
   const f=inp.files[0];if(!f)return;
   const pu=window._fsPU;
-  handlePhotoStandar(f,async url=>{
+  inp.value='';
+  openCropper(f,cropped=>{
+  handlePhotoStandar(cropped,async url=>{
     toast('Mengunggah…');
     try{
       const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
@@ -1346,6 +1470,7 @@ async function addFotoStandar(areaId,asp,inp){
         saveStore();renderAdmin();toast('Foto standar telah disimpan');
       }else alert('GAGAL mengunggah.\n\nPenyebab: '+(out.error||'tidak diketahui'));
     }catch(e){alert('GAGAL mengunggah. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+  });
   });
 }
 async function deleteGaleriFoto(areaId,asp,pu,url){
@@ -1854,9 +1979,11 @@ function editFinding(id){
   </div></div>`;
   window._efPhoto={foto:x.foto||'',fotoPerbaikan:x.fotoPerbaikan||''};
 }
-function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;handlePhoto(f,url=>{window._efPhoto[field]=url;
+function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;inp.value='';openCropper(f,cropped=>{handlePhoto(cropped,url=>{window._efPhoto[field]=url;
   // refresh just that photo-row by re-rendering modal preview
-  inp.closest('.photo-row').innerHTML=`<img src="${url}" class="photo-thumb" onclick="efRmPhoto('${field}')">`;});}
+  const row=document.querySelector(`#modal-root [onchange*="efAddPhoto('${field}'"]`)?.closest('.photo-row')
+    || document.querySelector(`#modal-root [onclick="efRmPhoto('${field}')"]`)?.closest('.photo-row');
+  if(row)row.innerHTML=`<img src="${url}" class="photo-thumb" onclick="efRmPhoto('${field}')">`;});});}
 function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
 function saveFinding(id,isNew){
   if(isLocked())return lockBlock();
@@ -2481,12 +2608,15 @@ async function _loadMyFindingPhotoIfAny(id){
 }
 function addMyFindingPhoto(id,inp){
   const f=inp.files[0];if(!f)return;
-  handlePhoto(f,url=>{
+  inp.value='';
+  openCropper(f,cropped=>{
+  handlePhoto(cropped,url=>{
     window._myFindingPhoto=window._myFindingPhoto||{};
     window._myFindingPhoto[id]=url;
     const row=$('#mf-photo-'+id);
     row.innerHTML=`<img class="photo-thumb" src="${url}" onclick="zoomFotoAcuan(this.src)">`;
     toast('Foto siap — ketuk Simpan untuk mengirim');
+  });
   });
 }
 async function saveMyFinding(id){
