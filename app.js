@@ -14,7 +14,7 @@ const ADMIN_PASS='admin5r';
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbxGrxZH9wi05uOgvdR7ckQ0qqKV9SkyREAyftq83ISEtoQ8O4Pp_5NYI6WnzN_tXCZRXg/exec';
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
@@ -622,8 +622,8 @@ function renderAssessBody(){
       const idx=Math.min(window._galeriIdx[gkey],galeriAcuan.length-1);
       const foto=galeriAcuan[idx];
       html+=`<div style="margin-bottom:10px">
-        <div style="position:relative;max-width:220px">
-          <img src="${foto.url}" style="width:100%;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">
+        <div style="position:relative">
+          <img src="${foto.url}" style="width:100%;max-height:280px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;cursor:zoom-in" onclick="zoomFotoAcuan(this.src)">
           ${galeriAcuan.length>1?`
           <button onclick="galeriNav('${gkey}',-1,${galeriAcuan.length})" style="position:absolute;left:4px;top:50%;transform:translateY(-50%);background:rgba(11,61,46,.75);color:#fff;border-radius:50%;width:28px;height:28px;font-weight:800">‹</button>
           <button onclick="galeriNav('${gkey}',1,${galeriAcuan.length})" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:rgba(11,61,46,.75);color:#fff;border-radius:50%;width:28px;height:28px;font-weight:800">›</button>
@@ -1266,12 +1266,19 @@ function zoomFotoAcuan(src){
    (galeri maks 3 foto per PU) dijalankan di backend agar konsisten meski
    beberapa admin/asesor menambah foto bersamaan dari device berbeda. */
 function admFotoStandar(){
-  if(!window._fsArea)window._fsArea=STORE.config.areaChecks[0]?.id;
-  if(!window._fsPU)window._fsPU=Object.keys(STORE.config.matrix)[0];
-  const area=STORE.config.areaChecks.find(a=>a.id===window._fsArea);
-  const fsKB=(fotoStandarUsage()/1024).toFixed(0);
-  const notifBelumDibaca=(STORE.config.fotoStandarNotif||[]).filter(n=>!n.dibaca);
-  return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2>
+  try{
+    if(!STORE.config.areaChecks||!STORE.config.areaChecks.length){
+      return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2><p class="hint">Belum ada Area Pemeriksaan yang terdaftar. Tambahkan area terlebih dahulu di tab "Area Pemeriksaan".</p></div>`;
+    }
+    if(!STORE.config.matrix||!Object.keys(STORE.config.matrix).length){
+      return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2><p class="hint">Belum ada Production Unit/Lokasi yang terdaftar. Lengkapi terlebih dahulu di tab "Formulir per Lokasi".</p></div>`;
+    }
+    if(!window._fsArea||!STORE.config.areaChecks.find(a=>a.id===window._fsArea))window._fsArea=STORE.config.areaChecks[0].id;
+    if(!window._fsPU||!STORE.config.matrix[window._fsPU])window._fsPU=Object.keys(STORE.config.matrix)[0];
+    const area=STORE.config.areaChecks.find(a=>a.id===window._fsArea);
+    const fsKB=(fotoStandarUsage()/1024).toFixed(0);
+    const notifBelumDibaca=(STORE.config.fotoStandarNotif||[]).filter(n=>!n.dibaca);
+    return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2>
     <p class="hint">Kelola galeri foto acuan (maksimal 3 foto per Production Unit per aspek) yang akan tampil kepada asesor sebagai carousel panduan penilaian. Foto standar ini BERBEDA untuk setiap PU — misalnya foto 5R Board PUJ dapat berbeda dari PUC atau PUG.</p>
     <p class="hint" style="margin-bottom:0">Perkiraan ukuran total: <b>~${fsKB} KB</b> — ikut tersebar ke penyimpanan setiap asesor saat formulir disinkronkan.</p>
     </div>
@@ -1310,6 +1317,13 @@ function admFotoStandar(){
         <p class="hint" style="margin-top:6px;margin-bottom:0">${galeri.length>=3?'Galeri penuh (maks 3). Hapus salah satu foto untuk menambah yang baru — atau biarkan, sistem akan otomatis menggantikan foto terlama saat foto baru masuk dari asesmen/closing temuan.':'Ketuk ✕ pada foto untuk menghapus.'}</p>
       </div>`;
     }).join(''):''}`;
+  }catch(e){
+    return `<div class="card"><h2>Foto Standar / Acuan Klausul</h2>
+      <p class="hint" style="color:var(--red)">Terjadi kesalahan saat memuat data foto standar. Kemungkinan data lama pada perangkat ini menggunakan format yang sudah usang.</p>
+      <p class="hint">Rincian teknis: ${esc(e.message||String(e))}</p>
+      <button class="btn btn-amber btn-block" onclick="if(confirm('Reset seluruh data Foto Standar pada perangkat ini? Tindakan ini tidak dapat dibatalkan, namun galeri di server (Google Sheets/Drive) tidak terpengaruh.')){STORE.config.fotoStandar={};STORE.config.fotoStandarNotif=[];saveStore();renderAdmin();}">Reset Data Foto Standar Lokal</button>
+    </div>`;
+  }
 }
 async function addFotoStandar(areaId,asp,inp){
   const f=inp.files[0];if(!f)return;
