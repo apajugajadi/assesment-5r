@@ -14,7 +14,19 @@ const ADMIN_PASS='admin5r';
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+const SYNC_URL_DEFAULT='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+/* Override untuk DEV di localhost — set sekali di Console:
+     localStorage.setItem('dev_sync_url','https://script.google.com/macros/s/.../exec')
+   atau lewat query ?sync=... . Di production (tanpa override) tetap pakai default. */
+const SYNC_URL=(function(){
+  try{
+    var q=new URLSearchParams(location.search).get('sync');
+    if(q){localStorage.setItem('dev_sync_url',q);return q;}
+    var d=localStorage.getItem('dev_sync_url');
+    if(d&&/^https?:/.test(d))return d;
+  }catch(e){}
+  return SYNC_URL_DEFAULT;
+})();
 const SYNC_SECRET='ganti-rahasia-ini-123';
 
 /* [MT] daftar tahun untuk dropdown: 2024 s/d tahun berjalan + 1 */
@@ -759,32 +771,23 @@ function renderAssessBody(){
           <button class="tidak ${v==='tidak'?'on':''}" onclick="setAns('${key}','tidak')"><span class="ic">✕</span>Tidak</button>
         </div></div>`;
     });
-    // (P-galeri) Foto Good Condition (dulu "Dokumentasi Foto", WAJIB min 1) +
-    // Foto Temuan/Not Good (BARU, berpasangan dengan Keterangan Temuan, wajib
-    // jika ada klausul "Tidak") — dipisah, blok masing-masing
+    // Foto Good Condition DIHAPUS (mengurangi berat payload sinkronisasi).
+    // Sekarang HANYA Foto Temuan/Not Good — dan WAJIB diisi bila ada klausul "Tidak"
+    // (berpasangan dengan Keterangan Temuan).
     const akey=`${areaId}|${asp}`;
-    const photosGood=d.photos[akey]||[];
     d.photosTemuan=d.photosTemuan||{};
     const photosTemuan=d.photosTemuan[akey]||[];
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const notePenuh=(d.notes[akey]||'').trim().length>0;
-    const fotoKurang=photosGood.length<1;
     const notePerlu=adaTidak&&!notePenuh;
-    html+=`<div class="finding" id="photo-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="foto">
-      <div class="finding-lbl">Foto Good Condition — ${asp} <span style="color:${fotoKurang?'var(--red)':'var(--muted)'};font-weight:700">(${photosGood.length}/5${fotoKurang?' · wajib minimal 1':''})</span></div>
-      <p class="hint" style="margin:2px 0 8px">Dokumentasikan kondisi sesuai standar. Foto ini dapat masuk galeri acuan Foto Standar untuk PU Anda.</p>
-      <div class="photo-row">
-        ${photosGood.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhoto('${akey}',${i})">`).join('')}
-        ${photosGood.length<5?`<label class="photo-add" style="${fotoKurang?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhoto('${akey}',this)"></label>`:''}
-      </div>
-    </div>`;
-    html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${notePerlu?'border-color:var(--red)':''}">
+    const fotoTemuanPerlu=adaTidak&&photosTemuan.length<1;
+    html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${notePerlu||fotoTemuanPerlu?'border-color:var(--red)':''}">
       <div class="finding-lbl">Keterangan Temuan — ${asp} ${adaTidak?`<span style="color:${notePerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib diisi — terdapat klausul "Tidak")</span>`:'<span style="color:var(--muted);font-weight:400">(opsional)</span>'}</div>
       <textarea class="note-input" style="${notePerlu?'border-color:var(--red)':''}" placeholder="Jelaskan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
-      <div class="finding-lbl" style="margin-top:10px">Foto Temuan / Not Good <span style="color:var(--muted);font-weight:400">(${photosTemuan.length}/5 · opsional)</span></div>
+      <div class="finding-lbl" style="margin-top:10px">Foto Temuan / Not Good — ${asp} <span style="color:${fotoTemuanPerlu?'var(--red)':'var(--muted)'};font-weight:700">(${photosTemuan.length}/5${adaTidak?(fotoTemuanPerlu?' · wajib minimal 1':''):' · opsional'})</span></div>
       <div class="photo-row">
         ${photosTemuan.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhotoTemuan('${akey}',${i})">`).join('')}
-        ${photosTemuan.length<5?`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
+        ${photosTemuan.length<5?`<label class="photo-add" style="${fotoTemuanPerlu?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
       </div>
     </div>`;
     html+=`</div>`;
@@ -808,7 +811,8 @@ function d_setNote(areaId,v){
   DRAFT.notes[areaId]=v;saveDraftLite();
   // (P2) update indikator wajib secara live tanpa re-render penuh
   const box=document.getElementById('temuan-'+areaId.replace(/[^\w]/g,'_'));
-  if(box&&v.trim()){box.style.borderColor='';const ta=box.querySelector('textarea');if(ta)ta.style.borderColor='';const lbl=box.querySelector('.finding-lbl span');if(lbl){lbl.style.color='var(--muted)';lbl.style.fontWeight='400';lbl.textContent='(wajib diisi — terdapat klausul "Tidak")'.replace('wajib diisi — ','');}}
+  const fotoTemuan=(DRAFT.photosTemuan&&DRAFT.photosTemuan[areaId])||[];
+  if(box&&v.trim()){const ta=box.querySelector('textarea');if(ta)ta.style.borderColor='';if(fotoTemuan.length>=1)box.style.borderColor='';}
 }
 function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}
   const ls=$('#live-score');if(ls){const lv=liveScore(DRAFT);const g=gradeFor(lv.avg);ls.style.color=g.color;ls.textContent=lv.avg?'Total '+lv.avg.toFixed(2)+' · '+g.label:'Total —';}}
@@ -823,14 +827,11 @@ function validateCurrentStep(){
   for(const asp of ASPECTS){
     const krit=area.aspects[asp];if(!krit||!krit.length)continue;
     const akey=`${areaId}|${asp}`;
-    const photos=d.photos[akey]||[];
-    if(photos.length<1){
-      const el=document.getElementById('photo-'+akey.replace(/[^\w]/g,'_'));
-      if(el)return el;
-    }
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const note=(d.notes[akey]||'').trim();
-    if(adaTidak&&!note){
+    const fotoTemuan=(d.photosTemuan&&d.photosTemuan[akey])||[];
+    // Foto & keterangan temuan WAJIB hanya bila ada klausul "Tidak" pada aspek ini
+    if(adaTidak&&(!note||fotoTemuan.length<1)){
       const el=document.getElementById('temuan-'+akey.replace(/[^\w]/g,'_'));
       if(el)return el;
     }
@@ -937,7 +938,7 @@ function generateFindings(draft){
         area:area.name, areaId:area.id, kategori:asp, r5:R5MAP[asp],
         skor,
         deskripsi:`[Nilai ${skor}] ${asp} belum terpenuhi: ${gagal.join('; ')}`,
-        foto:(draft.photos&&draft.photos[`${areaId}|${asp}`]&&draft.photos[`${areaId}|${asp}`][0])||'',
+        foto:(draft.photosTemuan&&draft.photosTemuan[`${areaId}|${asp}`]&&draft.photosTemuan[`${areaId}|${asp}`][0])||'',
         saran:'', target:String(new Date().getFullYear()),
         fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
         status:'Open', verifikator:'', auto:true
@@ -990,7 +991,8 @@ function buildSyncPayload(rec){
   // [MT] pastikan tahun & jenis ikut terkirim ke Code.gs (kolom Tahun/Jenis)
   const recOut=Object.assign({},rec,{
     tahun:(rec.tahun!=null&&rec.tahun!==''?rec.tahun:new Date().getFullYear()),
-    jenis:(rec.jenis||'Resmi')
+    jenis:(rec.jenis||'Resmi'),
+    photos:{} // Foto Good Condition dihapus — jangan kirim, biar payload ringan
   });
   return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
     predikat:rep.grade.label,record:recOut,detail,
@@ -1176,9 +1178,9 @@ function toggleDetail(ri){
 }
 function reportNotes(d){
   const items=[];
-  const keys=new Set([...Object.keys(d.notes||{}),...Object.keys(d.photos||{})]);
+  const keys=new Set([...Object.keys(d.notes||{}),...Object.keys(d.photosTemuan||{}),...Object.keys(d.photos||{})]);
   keys.forEach(k=>{
-    const note=(d.notes||{})[k], photos=((d.photos||{})[k])||[];
+    const note=(d.notes||{})[k], photos=((d.photosTemuan||{})[k])||((d.photos||{})[k])||[];
     if(!note&&!photos.length)return;
     // key format: areaId|aspek  (or legacy areaId)
     const parts=k.split('|');
