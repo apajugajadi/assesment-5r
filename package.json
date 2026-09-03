@@ -1,0 +1,10 @@
+{
+  "name": "assesment-5r",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplikasi Assesment 5R — static web app (vanilla JS, offline-first)",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "start": "node dev-server.js"
+  }
+}

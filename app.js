@@ -373,6 +373,7 @@ function render(){
   if(VIEW==='findings'&&DRAFT){renderFindings();return;}
   if(VIEW==='dashboard'){renderDashboard();return;}
   if(VIEW==='dashnilai'){renderDashNilai();return;}
+  if(VIEW==='dashsafety'){renderDashSafety();return;}
   if(VIEW==='temuansaya'&&auth.role==='asesor'){renderTemuanSaya();return;}
   renderHome();
 }
@@ -472,7 +473,8 @@ function openDrawer(){
     </div>
     <div class="drawer-nav">
       <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
-      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>`:''}
+      <button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>
+      <button class="drawer-item" onclick="drawerGo('dashsafety')"><span class="di-ic">⚠️</span> Dashboard Safety (K3)</button>
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
       ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya (Tindak Lanjut)</button>`:''}
       ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
@@ -602,6 +604,8 @@ function renderHome(){
     </div>`:''}
 
     ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Formulirulir & Butir Audit</button>`:''}
+    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='dashnilai';render()">Dashboard Nilai</button>
+    <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='dashsafety';render()">Dashboard Safety (K3)</button>
     <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">Dashboard Analisis Temuan</button>
   </div>`;
 }
@@ -646,7 +650,7 @@ function startAssess(){
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
   DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,asesorUsername:getAuth().username||'',date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
-    areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},curArea:0};
+    areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},safetyFindings:[],curArea:0};
   VIEW='assess';render();
 }
 function openSession(id){
@@ -659,6 +663,7 @@ function discardDraft(){if(!confirm('Batalkan isian yang belum selesai? Tidak bi
 /* ---------- ASSESS ---------- */
 function renderAssess(){
   const d=DRAFT;
+  d.safetyFindings=d.safetyFindings||[];
   const prog=draftProgress(d);
   // area navigation: list of selected areas + a final "interview" step
   const totalSteps=d.areas.length+1; // +1 for interview step at end
@@ -734,6 +739,7 @@ function renderAssessBody(){
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
       <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="removeAreaFromSession('${areaId}')">✕ Tidak Ditemukan di Lapangan</button>
       <button class="btn btn-sm" style="background:rgba(255,255,255,.15);color:#fff" onclick="showAddArea()">+ Tambah Area Lain</button>
+      ${d.locked?'':`<button class="btn btn-sm" style="background:var(--red);color:#fff" onclick="openSafetyFinding(null)">⚠ Temuan Safety${(d.safetyFindings&&d.safetyFindings.length)?` · ${d.safetyFindings.length}`:''}</button>`}
     </div>
     </div>`;
   ASPECTS.forEach(asp=>{
@@ -992,10 +998,15 @@ function buildSyncPayload(rec){
   const recOut=Object.assign({},rec,{
     tahun:(rec.tahun!=null&&rec.tahun!==''?rec.tahun:new Date().getFullYear()),
     jenis:(rec.jenis||'Resmi'),
-    photos:{} // Foto Good Condition dihapus — jangan kirim, biar payload ringan
+    photos:{}, // Foto Good Condition dihapus — jangan kirim, biar payload ringan
+    safetyFindings:[] // dikirim terpisah di top-level payload, jangan dobel di record
   });
   return {secret:SYNC_SECRET,configVersion:(STORE.config.version||1),
     predikat:rep.grade.label,record:recOut,detail,
+    safetyFindings:(rec.safetyFindings||[]).map(s=>({
+      id:s.id,kategori:s.kategori||'',lokasi:s.lokasi||'',
+      deskripsi:s.deskripsi||'',foto:s.foto||'',tanggal:s.tanggal||''
+    })),
     findings:(rec.findings||[]).map(f=>({
       id:f.id,area:f.area,areaId:f.areaId||'',kategori:f.kategori,skor:f.skor||'',
       deskripsi:f.deskripsi||'',penyebab:f.penyebab||'',saran:f.saran||'',target:f.target||'',
@@ -1086,6 +1097,7 @@ async function syncAllUnsynced(){
 /* ---------- REPORT ---------- */
 function renderReport(){
   const d=DRAFT, rep=computeReport(d), g=rep.grade;
+  d.safetyFindings=d.safetyFindings||[];
   const auth=getAuth();const isAdmin=auth&&auth.role==='admin';
   const lockBanner=d.locked?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0;display:flex;align-items:center;gap:12px">
     <span style="font-size:22px">🔒</span>
@@ -1130,6 +1142,7 @@ function renderReport(){
     </div>
     ${reportNotes(d)}
     ${findingsCard(d)}
+    ${safetyCard(d)}
     <div class="card">
       <h2>Ekspor Data</h2>
       <p class="hint">Simpan hasil penilaian untuk keperluan laporan atau kearsipan.</p>
@@ -1232,6 +1245,10 @@ function exportCSV(){
   rep.rows.forEach(r=>{if(r.detail)r.detail.forEach(dt=>rows.push([r.area,r.aspek,dt.q,dt.v==='ya'?'Ya':dt.v==='tidak'?'Tidak':'belum dijawab']));});
   rows.push([]);rows.push(['Temuan']);
   Object.keys(d.notes||{}).forEach(k=>{if(d.notes[k]){const parts=k.split('|');const a=STORE.config.areaChecks.find(x=>x.id===parts[0]);rows.push([(a?a.name:parts[0])+(parts[1]?' — '+parts[1]:''),d.notes[k]]);}});
+  if((d.safetyFindings||[]).length){
+    rows.push([]);rows.push(['Temuan Safety (K3)']);rows.push(['Kategori','Lokasi','Deskripsi']);
+    d.safetyFindings.forEach(s=>rows.push([s.kategori||'',s.lokasi||'',s.deskripsi||'']));
+  }
   const csv=rows.map(r=>r.map(c=>`"${String(c==null?'':c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
@@ -1920,14 +1937,16 @@ function regenTemuan(){
 
 function renderFindings(){
   const d=DRAFT;const f=d.findings||[];
+  d.safetyFindings=d.safetyFindings||[];
   app().innerHTML=topbar('Temuan 5R',d.loc+' · '+(d.periode||''))+`
   <div class="wrap">
     <div class="card">
-      <h2>Daftar Temuan</h2>
+      <h2>Daftar Temuan 5R</h2>
       <p class="hint">${f.length} temuan. Ketuk untuk mengubah rincian, tindak lanjut, dan status.</p>
       <button class="btn btn-amber btn-block" onclick="editFinding(null)">+ Tambah Temuan Manual</button>
     </div>
     ${f.length?f.map(x=>findingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Belum terdapat temuan.</div>'}
+    ${safetyCard(d)}
   </div>
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='report';render()">‹ Kembali ke Hasil</button></div>`;
 }
@@ -2010,6 +2029,222 @@ function saveFinding(id,isNew){
 function x_defaultTarget(){return String(new Date().getFullYear());}
 function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan telah dihapus');}
 
+/* ============ TEMUAN SAFETY (K3) — bisa dicatat kapan saja selama assessment ============
+   Terpisah dari temuan 5R. Disimpan di DRAFT.safetyFindings = [ {id, deskripsi,
+   lokasi, kategori, foto, tanggal} ]. Tombol mengambang (FAB) merah muncul di setiap
+   langkah penilaian; isinya kondisional — hanya tersimpan kalau memang diisi. */
+const SAFETY_KATEGORI=['Unsafe Condition','Unsafe Action','Housekeeping','APD / PPE','Potensi Kebakaran','Ergonomi','Lainnya'];
+function _persistDraft(){ if(VIEW==='assess')saveDraftLite(); else saveDraftSession(); }
+function openSafetyFinding(id){
+  if(isLocked())return lockBlock();
+  const d=DRAFT; d.safetyFindings=d.safetyFindings||[];
+  const isNew=!id;
+  const curArea=(!isNew?null:(d.curArea>0&&d.areas[d.curArea-1]?(STORE.config.areaChecks.find(a=>a.id===d.areas[d.curArea-1])||{}).name||'':''));
+  const x=id?d.safetyFindings.find(s=>s.id===id):{id:'sf'+Date.now()+Math.random().toString(36).slice(2,6),deskripsi:'',lokasi:curArea||'',kategori:'Unsafe Condition',foto:'',tanggal:new Date().toISOString()};
+  const katOpts=SAFETY_KATEGORI.map(k=>`<option ${k===x.kategori?'selected':''}>${esc(k)}</option>`).join('');
+  window._sfPhoto=x.foto||'';
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>${isNew?'Catat':'Ubah'} Temuan Safety (K3)</h3>
+    <p class="hint">Catat kondisi/tindakan tidak aman yang ditemukan di lapangan. Tidak memengaruhi nilai 5R.</p>
+    <label class="field"><span class="lbl">Kategori Bahaya</span><select class="input" id="sf-kat">${katOpts}</select></label>
+    <label class="field"><span class="lbl">Lokasi / Titik</span><input class="input" id="sf-lok" value="${esc(x.lokasi||'')}" placeholder="mis. Area Janitor, tangga blending"></label>
+    <label class="field"><span class="lbl">Deskripsi Temuan <span style="color:var(--red)">*</span></span><textarea class="input" id="sf-desk" style="min-height:70px" placeholder="Jelaskan bahaya / kondisi tidak aman…">${esc(x.deskripsi||'')}</textarea></label>
+    <label class="field"><span class="lbl">Foto <span style="color:var(--red)">*</span></span>
+      <div class="photo-row" id="sf-photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="sfRmPhoto()">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="sfAddPhoto(this)"></label>`}</div>
+    </label>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      ${isNew?'':`<button class="btn btn-danger" onclick="delSafetyFinding('${x.id}')">Hapus</button>`}
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveSafetyFinding('${x.id}',${isNew})">Simpan</button>
+    </div>
+  </div></div>`;
+}
+function sfAddPhoto(inp){const f=inp.files[0];if(!f)return;inp.value='';openCropper(f,cropped=>{handlePhoto(cropped,url=>{window._sfPhoto=url;const row=$('#sf-photo-row');if(row)row.innerHTML=`<img src="${url}" class="photo-thumb" onclick="sfRmPhoto()">`;});});}
+function sfRmPhoto(){window._sfPhoto='';const row=$('#sf-photo-row');if(row)row.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="sfAddPhoto(this)"></label>`;}
+function saveSafetyFinding(id,isNew){
+  if(isLocked())return lockBlock();
+  const d=DRAFT; d.safetyFindings=d.safetyFindings||[];
+  const deskripsi=($('#sf-desk').value||'').trim();
+  if(!deskripsi){toast('Deskripsi temuan safety wajib diisi');return;}
+  if(!window._sfPhoto){toast('Foto temuan safety wajib dilampirkan');return;}
+  const obj={id,deskripsi,lokasi:($('#sf-lok').value||'').trim(),kategori:$('#sf-kat').value,foto:window._sfPhoto||'',tanggal:new Date().toISOString()};
+  if(isNew)d.safetyFindings.push(obj);
+  else{const i=d.safetyFindings.findIndex(s=>s.id===id);if(i>=0)d.safetyFindings[i]={...d.safetyFindings[i],...obj};}
+  _persistDraft();closeModal();render();toast('Temuan safety tersimpan');
+}
+function delSafetyFinding(id){
+  if(isLocked())return lockBlock();
+  if(!confirm('Hapus temuan safety ini?'))return;
+  DRAFT.safetyFindings=(DRAFT.safetyFindings||[]).filter(s=>s.id!==id);
+  _persistDraft();closeModal();render();toast('Temuan safety dihapus');
+}
+function safetyCard(d){
+  const list=d.safetyFindings||[];
+  return `<div class="card">
+    <h2>Temuan Safety (K3)</h2>
+    <p class="hint">${list.length} temuan safety dicatat selama penilaian. Tidak memengaruhi nilai 5R.</p>
+    ${list.map(s=>`<div class="list-row" style="align-items:flex-start;cursor:pointer" onclick="openSafetyFinding('${s.id}')">
+      ${s.foto?`<img src="${s.foto}" style="width:46px;height:46px;border-radius:8px;object-fit:cover;flex-shrink:0">`:''}
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:800;color:var(--red);letter-spacing:.03em">${esc(s.kategori||'')}</div>
+        <div style="font-size:13px;font-weight:600;margin:2px 0">${esc(s.deskripsi||'')}</div>
+        ${s.lokasi?`<div style="font-size:11px;color:var(--muted)">📍 ${esc(s.lokasi)}</div>`:''}
+      </div>
+    </div>`).join('')}
+    ${d.locked?'':`<button class="btn btn-ghost btn-block btn-sm" style="margin-top:6px" onclick="openSafetyFinding(null)">+ Tambah Temuan Safety</button>`}
+  </div>`;
+}
+
+/* ============ DASHBOARD SAFETY (K3) — admin, narik cloud ============ */
+let _dashSafetyData=null;
+let SF_FILTER={status:'Open',pu:'',kategori:''};
+function renderDashSafety(){
+  app().innerHTML=topbar('Dashboard Safety (K3)','Temuan Keselamatan — Data dari Google')+`
+  <div class="wrap" id="sf-body">
+    <div class="empty"><div class="ic">⏳</div>Sedang mengambil data dari Google…</div>
+  </div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
+  loadDashSafety();
+}
+async function loadDashSafety(){
+  const b=$('#sf-body');if(!b)return;
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    _dashSafetyData=out.safety||[];
+    drawDashSafety();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadDashSafety()">Coba Lagi</button></div>`;}
+}
+function drawDashSafety(){
+  const b=$('#sf-body');if(!b)return;
+  const all=_dashSafetyData||[];
+  if(!all.length){b.innerHTML='<div class="empty"><div class="ic">⚠️</div>Belum terdapat temuan safety yang tersinkron.</div>';return;}
+  const pus=[...new Set(all.map(x=>x['PU']).filter(Boolean))].sort();
+  const kats=[...new Set(all.map(x=>x['Kategori']).filter(Boolean))].sort();
+  const total=all.length;
+  const open=all.filter(x=>(x['Status']||'Open')==='Open').length;
+  const close=total-open;
+  const pctClose=total?Math.round(close/total*100):0;
+  // rekap per kategori
+  const perKat={};all.forEach(x=>{const k=x['Kategori']||'(lainnya)';perKat[k]=perKat[k]||{t:0,o:0};perKat[k].t++;if((x['Status']||'Open')==='Open')perKat[k].o++;});
+  // rekap per PU
+  const perPU={};all.forEach(x=>{const k=x['PU']||'(?)';perPU[k]=perPU[k]||{t:0,o:0};perPU[k].t++;if((x['Status']||'Open')==='Open')perPU[k].o++;});
+
+  let rows=all.slice();
+  if(SF_FILTER.status)rows=rows.filter(x=>(x['Status']||'Open')===SF_FILTER.status);
+  if(SF_FILTER.pu)rows=rows.filter(x=>x['PU']===SF_FILTER.pu);
+  if(SF_FILTER.kategori)rows=rows.filter(x=>x['Kategori']===SF_FILTER.kategori);
+
+  b.innerHTML=`
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Ringkasan</h2>
+      <button class="btn btn-ghost btn-sm" onclick="loadDashSafety()">Perbarui</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;text-align:center;padding:12px;background:var(--concrete);border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px">${total}</div><div style="font-size:11px;color:var(--muted);font-weight:700">TOTAL</div></div>
+      <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div><div style="font-size:11px;color:var(--muted);font-weight:700">TERBUKA</div></div>
+      <div style="flex:1;text-align:center;padding:12px;background:#EAF5EC;border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green-400)">${close}</div><div style="font-size:11px;color:var(--muted);font-weight:700">SELESAI</div></div>
+      <div style="flex:1;text-align:center;padding:12px;background:var(--concrete);border-radius:10px">
+        <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green)">${pctClose}%</div><div style="font-size:11px;color:var(--muted);font-weight:700">% SELESAI</div></div>
+    </div>
+    <div style="font-size:12px;font-weight:800;color:var(--muted);margin-bottom:6px">PER KATEGORI</div>
+    ${Object.keys(perKat).sort().map(k=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)">
+      <span>${esc(k)}</span><span style="font-weight:700">${perKat[k].o} terbuka / ${perKat[k].t}</span></div>`).join('')}
+    <div style="font-size:12px;font-weight:800;color:var(--muted);margin:12px 0 6px">PER PRODUCTION UNIT</div>
+    ${Object.keys(perPU).sort().map(k=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)">
+      <span>${esc(k)}</span><span style="font-weight:700">${perPU[k].o} terbuka / ${perPU[k].t}</span></div>`).join('')}
+  </div>
+  <div class="card">
+    <h2 style="margin:0 0 10px">Daftar Temuan Safety</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <select class="input" style="flex:1;min-width:100px" onchange="SF_FILTER.status=this.value;drawDashSafety()">
+        <option value="Open" ${SF_FILTER.status==='Open'?'selected':''}>Status: Terbuka</option>
+        <option value="Close" ${SF_FILTER.status==='Close'?'selected':''}>Status: Selesai</option>
+        <option value="" ${SF_FILTER.status===''?'selected':''}>Seluruh Status</option>
+      </select>
+      <select class="input" style="flex:1;min-width:100px" onchange="SF_FILTER.pu=this.value;drawDashSafety()">
+        <option value="">Seluruh PU</option>${pus.map(p=>`<option ${p===SF_FILTER.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+      <select class="input" style="flex:1;min-width:100px" onchange="SF_FILTER.kategori=this.value;drawDashSafety()">
+        <option value="">Seluruh Kategori</option>${kats.map(p=>`<option ${p===SF_FILTER.kategori?'selected':''}>${esc(p)}</option>`).join('')}</select>
+    </div>
+  </div>
+  ${rows.length?rows.map(x=>safetyMonRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak ada temuan untuk filter ini.</div>'}`;
+}
+function safetyMonRow(x){
+  const id=x['ID Safety'];
+  const st=x['Status']||'Open';
+  const stColor=st==='Close'?'var(--green-400)':'var(--red)';
+  const isAdmin=(getAuth()||{}).role==='admin';
+  const head=`<div class="card" style="padding:14px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+      <span style="font-size:11px;font-weight:800;color:#fff;background:var(--red);padding:3px 9px;border-radius:6px">${esc(x['Kategori']||'')}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(st)}</span>
+    </div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Asesor: ${esc(x['Asesor']||'-')} · ${esc((x['Tanggal Temuan']||'').slice(0,10))}</div>
+    ${x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:''}`;
+  if(!isAdmin){
+    // VIEW-ONLY untuk non-admin
+    return head+`
+    ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;margin-bottom:4px"><b>Tindak lanjut:</b> ${esc(x['Deskripsi Perbaikan'])}</div>`:''}
+    ${x['Tgl Perbaikan']?`<div style="font-size:11px;color:var(--muted)">Selesai: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</div>`:''}
+    ${x['Verifikator']?`<div style="font-size:11px;color:var(--muted)">Verifikator: ${esc(x['Verifikator'])}</div>`:''}
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
+  </div>`;
+  }
+  return head+`
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="sm-dp-${id}" style="min-height:44px">${esc(x['Deskripsi Perbaikan']||'')}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="sm-tgl-${id}" type="date" value="${esc((x['Tgl Perbaikan']||'').slice(0,10))}"></label>
+    <label class="field"><span class="lbl">Status</span><select class="input" id="sm-st-${id}">
+      <option ${st==='Open'?'selected':''}>Open</option><option ${st==='Close'?'selected':''}>Close</option></select></label>
+    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="sm-vf-${id}" value="${esc(x['Verifikator']||'')}" placeholder="Nama verifikator"></label>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
+      <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveSafetyMon('${esc(id)}')">Simpan</button>
+    </div>
+  </div>`;
+}
+async function saveSafetyMon(id){
+  if((getAuth()||{}).role!=='admin'){toast('Hanya administrator yang dapat mengubah tindak lanjut');return;}
+  const fields={
+    'Deskripsi Perbaikan':$('#sm-dp-'+id).value.trim(),
+    'Tgl Perbaikan':$('#sm-tgl-'+id).value,
+    Status:$('#sm-st-'+id).value,
+    Verifikator:$('#sm-vf-'+id).value.trim()
+  };
+  toast('Sedang menyimpan…');
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||'Admin'})});
+    const out=await res.json();
+    if(out.ok){
+      const t=(_dashSafetyData||[]).find(x=>x['ID Safety']===id);
+      if(t)Object.assign(t,fields);
+      toast('Tersimpan');drawDashSafety();
+    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
+  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+}
+async function viewSafetyPhoto(id){
+  toast('Mengambil foto…');
+  try{
+    const res=await fetch(SYNC_URL+'?action=safetyPhotos&secret='+encodeURIComponent(SYNC_SECRET)+'&safetyId='+encodeURIComponent(id));
+    const out=await res.json();
+    if(!out.ok){toast('Gagal mengambil foto');return;}
+    $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+      <h3>Foto Temuan Safety</h3>
+      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SEBELUM / TEMUAN</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SESUDAH / PERBAIKAN</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:''}
+      <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
+    </div></div>`;
+  }catch(e){toast('Gagal mengambil foto');}
+}
 
 /* ============ DASHBOARD NILAI (narik cloud, admin) ============ */
 let _dashNilaiData=null;
@@ -2187,34 +2422,8 @@ function drawDashNilai(){
   // ===== GRAFIK realisasi vs target (final per PU) =====
   html+=`<div class="card"><h2 style="font-size:16px">Grafik Nilai Akhir terhadap Target per Production Unit</h2>${barVsTarget(puRows.map(p=>({label:p.pu,nilai:p.final,target:p.target})))}</div>`;
 
-  // ===== SIMULASI =====
-  html+=`<div class="card"><h2 style="font-size:16px">Simulasi Pencapaian Target</h2>
-    <p class="hint">Hitung skenario nilai akhir. Bobot: Mid ${w.midYear}% · End ${w.endYear}%.</p>
-    <div class="seg" style="background:var(--concrete);margin-bottom:10px">
-      <button class="${SIM_MODE==='reverse'?'on':''}" style="color:${SIM_MODE==='reverse'?'#fff':'var(--muted)'};background:${SIM_MODE==='reverse'?'var(--green)':'transparent'}" onclick="SIM_MODE='reverse';drawDashNilai()">Berapa Nilai End yang Dibutuhkan?</button>
-      <button class="${SIM_MODE==='predict'?'on':''}" style="color:${SIM_MODE==='predict'?'#fff':'var(--muted)'};background:${SIM_MODE==='predict'?'var(--green)':'transparent'}" onclick="SIM_MODE='predict';drawDashNilai()">Prediksi Nilai Akhir</button>
-    </div>
-    <label class="field"><span class="lbl">Pilih Cakupan</span>
-      <select class="input" id="sim-scope">
-        <option value="nasional" ${SIM.scope==='nasional'?'selected':''}>Nasional</option>
-        ${pus.map(p=>`<option value="${esc(p)}" ${SIM.scope===p?'selected':''}>${esc(p)}</option>`).join('')}
-      </select></label>
-    ${SIM_MODE==='reverse'?`
-      <label class="field"><span class="lbl">Nilai Mid Year (aktual/asumsi)</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="contoh 3,5"></label>
-      <label class="field"><span class="lbl">Target Nilai Akhir yang Ingin Dicapai</span><input class="input" id="sim-target" type="number" step="0.01" min="1" max="5" value="${SIM.target||''}" placeholder="contoh 4,0"></label>
-      <button class="btn btn-primary btn-block" onclick="runSimReverse()">Hitung Nilai End Year yang Dibutuhkan</button>
-    `:`
-      <label class="field"><span class="lbl">Nilai Mid Year</span><input class="input" id="sim-mid" type="number" step="0.01" min="1" max="5" value="${SIM.mid||''}" placeholder="contoh 3,5"></label>
-      <label class="field"><span class="lbl">Nilai End Year</span><input class="input" id="sim-end" type="number" step="0.01" min="1" max="5" value="${SIM.end||''}" placeholder="contoh 4,2"></label>
-      <button class="btn btn-primary btn-block" onclick="runSimPredict()">Hitung Nilai Akhir</button>
-    `}
-    <div id="sim-result"></div>
-  </div>`;
-
   html+=`<div class="card"><button class="btn btn-ghost btn-block" onclick="loadDashNilai()">Perbarui dari Google</button></div>`;
   b.innerHTML=html;
-  // render hasil simulasi terakhir kalau ada
-  if(SIM.lastResult){$('#sim-result').innerHTML=SIM.lastResult;}
 }
 
 /* [MT] Tren antar-tahun: rata-rata Nilai Akhir per PU per tahun (ikut filter jenis) */
@@ -2262,45 +2471,6 @@ function trenAntarTahun(allRows){
   </div>`;
 }
 
-let SIM_MODE='reverse';
-let SIM={scope:'nasional',mid:'',end:'',target:'',lastResult:''};
-function _simWeights(){const w=STORE.config.weights||{midYear:35,endYear:65};return {wMid:(Number(w.midYear)||0)/100,wEnd:(Number(w.endYear)||0)/100,mp:w.midYear,ep:w.endYear};}
-function runSimReverse(){
-  const {wMid,wEnd,mp,ep}=_simWeights();
-  SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.target=$('#sim-target').value;
-  const mid=parseFloat(SIM.mid), tgt=parseFloat(SIM.target);
-  if(isNaN(mid)||isNaN(tgt)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Mohon isi Mid Year dan Target terlebih dahulu.</div>';return;}
-  if(wEnd===0){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Bobot End Year 0%, perhitungan tidak dapat dilakukan.</div>';return;}
-  // final = mid*wMid + end*wEnd  =>  end = (target - mid*wMid)/wEnd
-  const endNeeded=(tgt-mid*wMid)/wEnd;
-  let note='',col='var(--green)';
-  if(endNeeded>5){note='Tidak mungkin tercapai — membutuhkan nilai End Year di atas 5 (di luar skala).';col='var(--red)';}
-  else if(endNeeded<1){note='Target sudah pasti tercapai — bahkan dengan End Year minimum (1) sekalipun.';col='var(--green)';}
-  else note='Untuk mencapai target nilai akhir '+tgt.toFixed(2)+', nilai End Year harus mencapai minimal angka tersebut.';
-  SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
-    <div style="font-size:11px;color:var(--muted);font-weight:700">NILAI END YEAR YANG DIBUTUHKAN (${esc(SIM.scope)})</div>
-    <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${col}">${endNeeded>5||endNeeded<1?(endNeeded>5?'>5':'<1'):endNeeded.toFixed(2)}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:4px">${note}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ?×${ep}% = ${tgt.toFixed(2)}</div>
-  </div>`;
-  $('#sim-result').innerHTML=SIM.lastResult;
-}
-function runSimPredict(){
-  const {wMid,wEnd,mp,ep}=_simWeights();
-  SIM.scope=$('#sim-scope').value; SIM.mid=$('#sim-mid').value; SIM.end=$('#sim-end').value;
-  const mid=parseFloat(SIM.mid), end=parseFloat(SIM.end);
-  if(isNaN(mid)||isNaN(end)){$('#sim-result').innerHTML='<div style="color:var(--red);font-size:13px;margin-top:10px">Mohon isi Mid Year dan End Year terlebih dahulu.</div>';return;}
-  const final=mid*wMid+end*wEnd;
-  const tgt=SIM.scope==='nasional'?targetNasional():targetPU(SIM.scope);
-  const ok=tgt&&final>=tgt;
-  SIM.lastResult=`<div style="margin-top:12px;padding:14px;background:var(--concrete);border-radius:12px;text-align:center">
-    <div style="font-size:11px;color:var(--muted);font-weight:700">PREDIKSI NILAI AKHIR (${esc(SIM.scope)})</div>
-    <div style="font-family:Archivo;font-weight:800;font-size:34px;color:${tgt?(ok?'var(--green)':'var(--red)'):'var(--ink)'}">${final.toFixed(2)}</div>
-    <div style="font-size:12px;color:var(--muted);margin-top:4px">${tgt?(ok?'Mencapai target '+tgt.toFixed(2):'Berada di bawah target '+tgt.toFixed(2)):'(target belum diisi)'}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">Mid ${mid.toFixed(2)}×${mp}% + End ${end.toFixed(2)}×${ep}% = ${final.toFixed(2)}</div>
-  </div>`;
-  $('#sim-result').innerHTML=SIM.lastResult;
-}
 function vsTarget(nilai,target){
   if(!target||!nilai)return '';
   const d=nilai-target;
@@ -2675,7 +2845,7 @@ function renderDashboard(){
 
   app().innerHTML=topbar('Dashboard Temuan','Analisis 5R')+`
   <div class="wrap">
-    ${auth.role==='admin'&&SYNC_URL?`<div class="card" style="padding:10px">
+    ${SYNC_URL?`<div class="card" style="padding:10px">
       <div class="seg" style="background:var(--concrete);margin:0">
         <button class="${DASH_SRC==='local'?'on':''}" style="color:${DASH_SRC==='local'?'#fff':'var(--muted)'};background:${DASH_SRC==='local'?'var(--green)':'transparent'}" onclick="DASH_SRC='local';renderDashboard()">Perangkat Ini</button>
         <button class="${DASH_SRC==='cloud'?'on':''}" style="color:${DASH_SRC==='cloud'?'#fff':'var(--muted)'};background:${DASH_SRC==='cloud'?'var(--green)':'transparent'}" onclick="DASH_SRC='cloud';${_dashCloudData?'renderDashboard()':'loadDashCloud()'}">☁ Seluruh Asesor (Cloud)</button>
