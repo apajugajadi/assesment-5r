@@ -1004,22 +1004,21 @@ function buildSyncPayload(rec){
       foto:f.foto||'',fotoPerbaikan:f.fotoPerbaikan||''
     }))};
 }
-/* [P7] POST dengan progress upload (%) via XHR — fetch() tidak expose progress upload native */
+/* POST ke Apps Script — WAJIB pakai fetch() sebagai "simple request"
+   (method POST + Content-Type text/plain, tanpa header lain & tanpa
+   xhr.upload listener). Kalau pakai XHR dengan xhr.upload.onprogress,
+   browser memaksa CORS preflight (OPTIONS) yang TIDAK didukung Apps Script
+   → "Permintaan CORS tidak berhasil". Karena itu progress upload per-persen
+   tidak tersedia; onProgress dipanggil bertahap saja. */
 function xhrPostProgress(url,bodyStr,onProgress){
-  return new Promise((resolve,reject)=>{
-    const xhr=new XMLHttpRequest();
-    xhr.open('POST',url,true);
-    xhr.setRequestHeader('Content-Type','text/plain;charset=utf-8');
-    xhr.upload.onprogress=function(e){
-      if(e.lengthComputable&&onProgress)onProgress(Math.round(e.loaded/e.total*100));
-    };
-    xhr.onload=function(){
-      try{resolve(JSON.parse(xhr.responseText));}
-      catch(err){reject(new Error('Respons tidak valid dari server'));}
-    };
-    xhr.onerror=function(){reject(new Error('Gagal terhubung ke server'));};
-    xhr.send(bodyStr);
-  });
+  if(onProgress)onProgress(5);
+  return fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:bodyStr})
+    .then(function(r){ if(onProgress)onProgress(85); return r.text(); },
+          function(){ throw new Error('Gagal terhubung ke server'); })
+    .then(function(t){
+      if(onProgress)onProgress(100);
+      try{return JSON.parse(t);}catch(e){throw new Error('Respons tidak valid dari server');}
+    });
 }
 /* [P7] Modal progress sinkronisasi */
 function showSyncProgress(label){
