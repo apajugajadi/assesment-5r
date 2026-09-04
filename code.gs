@@ -54,7 +54,8 @@ var HEAD_DETAIL = [
 var HEAD_TEMUAN = [
   'ID Temuan','ID Sesi','PU','Lokasi','Periode','Asesor','Area','Kategori','Skor',
   'Deskripsi','Saran','Target','Deskripsi Perbaikan','Tgl Perbaikan','Status','Verifikator','Folder Foto',
-  'Penyebab','Berulang','Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Dijadikan Standar','Area ID','Asesor Username'
+  'Penyebab','Berulang','Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Dijadikan Standar','Area ID','Asesor Username',
+  'Catatan Verifikasi','Update Terakhir'
 ];
 // Batas aman panjang string per sel Sheets (~50rb char); dataURL foto yang sudah dikompres
 // biasanya jauh di bawah ini, tapi kita pasang jaga-jaga agar tidak error saat setValues.
@@ -73,7 +74,8 @@ var HEAD_SAFETY = [
   'ID Safety','ID Sesi','PU','Lokasi','Periode','Tahun','Asesor','Asesor Username',
   'Kategori','Lokasi Titik','Deskripsi','Tanggal Temuan',
   'Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator',
-  'Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Folder Foto'
+  'Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Folder Foto',
+  'Catatan Verifikasi','Update Terakhir'
 ];
 // Kolom foto dikecualikan dari listing utama (hemat payload) — diambil on-demand.
 var SAFETY_KOLOM_FOTO = ['Foto Temuan (DataURL)','Foto Perbaikan (DataURL)'];
@@ -111,6 +113,14 @@ function doPost(e) {
     // ---- mode: admin memperbarui tindak lanjut Temuan Safety (K3) ----
     if (body.type === 'updateSafetyFinding') {
       return _json(_updateSafetyFields(body.safetyId, body.fields, body.verifikator));
+    }
+
+    // ---- mode: ASESOR pembuat (atau admin) memverifikasi temuan ----
+    if (body.type === 'verifyFinding') {
+      return _json(_verifyFinding(body.findingId, body.username, !!body.admin, body.fields || {}));
+    }
+    if (body.type === 'verifySafetyFinding') {
+      return _json(_verifySafetyFinding(body.safetyId, body.username, !!body.admin, body.fields || {}));
     }
 
     // ---- (P-closing) mode: ASESOR menutup temuan miliknya sendiri (upload foto after,
@@ -253,17 +263,26 @@ function doPost(e) {
     if (body.findings && body.findings.length) {
       var trows = body.findings.map(function(f){
         var prev = oldData[f.id] || {};
-        var st = prev.status || f.status || 'Open';       // pertahankan status yang sudah diubah admin
+        var st = prev.status || f.status || 'Open';       // pertahankan status yang sudah diubah tim TL
         var penyebab = f.penyebab || prev.penyebab || '';  // penyebab (root cause)
         var key = (f.area||'') + '|' + (f.kategori||'');
         var berulang = historyKeys[key] ? 'Ya' : 'Tidak';
         var fotoT = _clampCell(f.foto || '');
-        var fotoP = _clampCell(f.fotoPerbaikan || '');
+        // Kolom tindak lanjut: nilai yang sudah diisi tim TL di baris lama diutamakan,
+        // supaya sinkron ulang oleh asesor TIDAK menghapus progress penutupan temuan.
+        var target = prev.target || f.target || '';
+        var deskP = prev.deskPerbaikan || f.deskPerbaikan || '';
+        var tglP = prev.tglPerbaikan || f.tglPerbaikan || '';
+        var verif = prev.verifikator || f.verifikator || '';
+        var fotoP = _clampCell(prev.fotoPerbaikan || f.fotoPerbaikan || '');
         var standar = prev.standar || 'Tidak'; // pertahankan penanda "dijadikan standar" agar tidak hilang saat re-sync
+        var catV = prev.catatanVerifikasi || '';
+        var updT = prev.updateTerakhir || nowStr;
         return [f.id, rec.id, rec.pu||'', rec.loc||'', rec.periode||'', rec.asesor||'',
                 f.area||'', f.kategori||'', f.skor||'', f.deskripsi||'', f.saran||'',
-                f.target||'', f.deskPerbaikan||'', f.tglPerbaikan||'', st, f.verifikator||'', folderUrl,
-                penyebab, berulang, fotoT, fotoP, standar, f.areaId||'', rec.asesorUsername||''];
+                target, deskP, tglP, st, verif, folderUrl,
+                penyebab, berulang, fotoT, fotoP, standar, f.areaId||'', rec.asesorUsername||'',
+                catV, updT];
       });
       sTemuan.getRange(sTemuan.getLastRow()+1, 1, trows.length, trows[0].length).setValues(trows);
     }
@@ -281,7 +300,8 @@ function doPost(e) {
         return [ sf.id, rec.id, rec.pu||'', rec.loc||'', rec.periode||'', tj.tahun, rec.asesor||'', rec.asesorUsername||'',
                  sf.kategori||'', sf.lokasi||'', sf.deskripsi||'', sf.tanggal||'',
                  stS, prev.deskPerbaikan||'', prev.tglPerbaikan||'', prev.verifikator||'',
-                 _clampCell(sf.foto||''), _clampCell(prev.fotoPerbaikan||''), folderUrl ];
+                 _clampCell(sf.foto||''), _clampCell(prev.fotoPerbaikan||''), folderUrl,
+                 prev.catatanVerifikasi||'', prev.updateTerakhir||nowStr ];
       });
       sSafety.getRange(sSafety.getLastRow()+1, 1, sfrows.length, sfrows[0].length).setValues(sfrows);
     }
@@ -619,8 +639,9 @@ function _listAssessments() {
 
 // ---- Bantuan pengolahan TEMUAN ----
 function _oldTemuanMap(sh, sesiId) {
-  // Mengembalikan {idTemuan: {status, penyebab, standar}} untuk baris lama pada sesi ini,
-  // agar status/penyebab/penanda-standar yang sudah diedit admin tidak tertimpa saat sinkron ulang.
+  // Mengembalikan {idTemuan: {status, penyebab, standar, target, deskPerbaikan, tglPerbaikan,
+  // verifikator, fotoPerbaikan}} untuk baris lama pada sesi ini — SEMUA kolom tindak lanjut
+  // yang dikelola tim Tindak Lanjut / admin dipertahankan saat asesor sinkron ulang.
   var map = {};
   var last = sh.getLastRow();
   if (last < 2) return map;
@@ -628,13 +649,27 @@ function _oldTemuanMap(sh, sesiId) {
   var iStatus = head.indexOf('Status');
   var iPenyebab = head.indexOf('Penyebab');
   var iStandar = head.indexOf('Dijadikan Standar');
+  var iTarget = head.indexOf('Target');
+  var iDeskP = head.indexOf('Deskripsi Perbaikan');
+  var iTglP = head.indexOf('Tgl Perbaikan');
+  var iVerif = head.indexOf('Verifikator');
+  var iFotoP = head.indexOf('Foto Perbaikan (DataURL)');
+  var iCatV = head.indexOf('Catatan Verifikasi');
+  var iUpd = head.indexOf('Update Terakhir');
   var vals = sh.getRange(2, 1, last-1, sh.getLastColumn()).getValues();
   for (var r = 0; r < vals.length; r++) {
     if (vals[r][1] === sesiId) {
       map[vals[r][0]] = {
         status: iStatus > -1 ? vals[r][iStatus] : '',
         penyebab: iPenyebab > -1 ? vals[r][iPenyebab] : '',
-        standar: iStandar > -1 ? vals[r][iStandar] : ''
+        standar: iStandar > -1 ? vals[r][iStandar] : '',
+        target: iTarget > -1 ? vals[r][iTarget] : '',
+        deskPerbaikan: iDeskP > -1 ? vals[r][iDeskP] : '',
+        tglPerbaikan: iTglP > -1 ? vals[r][iTglP] : '',
+        verifikator: iVerif > -1 ? vals[r][iVerif] : '',
+        fotoPerbaikan: iFotoP > -1 ? vals[r][iFotoP] : '',
+        catatanVerifikasi: iCatV > -1 ? vals[r][iCatV] : '',
+        updateTerakhir: iUpd > -1 ? vals[r][iUpd] : ''
       };
     }
   }
@@ -752,6 +787,11 @@ function _updateTemuanFields(findingId, fields, verifikator) {
         for (var key in fields) {
           var col = head.indexOf(key);
           if (col >= 0) sh.getRange(rowNum, col+1).setValue(fields[key]);
+        }
+        // Catat "Update Terakhir" saat Status berubah — dipakai deteksi temuan mandek
+        var iUpd0 = head.indexOf('Update Terakhir');
+        if (iUpd0 > -1 && fields && Object.prototype.hasOwnProperty.call(fields,'Status') && statusLama !== fields['Status']) {
+          sh.getRange(rowNum, iUpd0+1).setValue(new Date().toISOString());
         }
         // (P-galeri) Sama seperti closing oleh asesor: kalau admin mengubah status
         // menjadi Close dan ada foto perbaikan, otomatis masuk galeri foto standar.
@@ -955,7 +995,7 @@ function _getSafetyPhotos(safetyId) {
 }
 // Admin memperbarui tindak lanjut satu temuan safety. Perubahan Status dicatat ke
 // tab RiwayatStatus (jejak audit) sama seperti Temuan 5R.
-var SAFETY_ALLOWED_FIELDS = ['Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator','Foto Perbaikan (DataURL)','Kategori','Lokasi Titik','Deskripsi'];
+var SAFETY_ALLOWED_FIELDS = ['Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator','Foto Perbaikan (DataURL)','Kategori','Lokasi Titik','Deskripsi','Catatan Verifikasi'];
 function _updateSafetyFields(safetyId, fields, verifikator) {
   try {
     if (!safetyId) return {ok:false, error:'safetyId kosong'};
@@ -981,11 +1021,69 @@ function _updateSafetyFields(safetyId, fields, verifikator) {
           if (key === 'Foto Perbaikan (DataURL)') v = _clampCell(v || '');
           sh.getRange(rowNum, col + 1).setValue(v);
         }
+        var iUpdS = head.indexOf('Update Terakhir');
+        if (iUpdS > -1 && fields && Object.prototype.hasOwnProperty.call(fields,'Status') && statusLama !== fields['Status']) {
+          sh.getRange(rowNum, iUpdS+1).setValue(new Date().toISOString());
+        }
         return {ok:true, safetyId: safetyId};
       }
     }
     return {ok:false, error:'temuan safety tidak ditemukan'};
   } catch (e) { return {ok:false, error:String(e)}; }
+}
+
+// ============================================================
+//  VERIFIKASI TEMUAN oleh ASESOR PEMBUAT (atau admin sebagai fallback)
+// ============================================================
+// Asesor yang membuat temuan meninjau bukti perbaikan tim TL lalu:
+//   - Status 'Close'  -> disetujui (Verifikator terisi otomatis)
+//   - Status 'Open'   -> ditolak (wajib Catatan Verifikasi -> tim TL revisi)
+// Kepemilikan divalidasi DI SERVER: 'Asesor Username' baris harus sama dengan
+// username pemanggil, KECUALI isAdmin=true.
+var VERIFY_ALLOWED = ['Status','Verifikator','Catatan Verifikasi'];
+function _verifyGeneric(sheetName, idHeader, itemId, username, isAdmin, fields) {
+  try {
+    if (!itemId) return {ok:false, error:'id kosong'};
+    if (!isAdmin && !username) return {ok:false, error:'sesi tidak valid, silakan login ulang'};
+    var ss = _getSheet();
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh || sh.getLastRow() < 2) return {ok:false, error:'data tidak ditemukan'};
+    var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    var iId = head.indexOf(idHeader), iUser = head.indexOf('Asesor Username'),
+        iSesi = head.indexOf('ID Sesi'), iStatus = head.indexOf('Status'), iUpd = head.indexOf('Update Terakhir');
+    var last = sh.getLastRow();
+    var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
+    for (var r = 0; r < vals.length; r++) {
+      if (vals[r][iId] === itemId) {
+        if (!isAdmin && String(vals[r][iUser]) !== String(username)) {
+          return {ok:false, error:'Anda bukan pembuat temuan ini — tidak berwenang memverifikasi.'};
+        }
+        var rowNum = r + 2;
+        var statusLama = iStatus > -1 ? vals[r][iStatus] : '';
+        var newStatus = fields && fields['Status'];
+        if (newStatus === 'Open' && !(fields['Catatan Verifikasi'] || '').trim()) {
+          return {ok:false, error:'Catatan Verifikasi wajib diisi saat menolak.'};
+        }
+        for (var key in fields) {
+          if (VERIFY_ALLOWED.indexOf(key) === -1) continue;
+          var col = head.indexOf(key);
+          if (col >= 0) sh.getRange(rowNum, col + 1).setValue(fields[key]);
+        }
+        if (iStatus > -1 && newStatus && newStatus !== statusLama) {
+          _catatRiwayatStatus(itemId, vals[r][iSesi], statusLama, newStatus, (fields['Verifikator'] || username || 'Admin'));
+          if (iUpd > -1) sh.getRange(rowNum, iUpd + 1).setValue(new Date().toISOString());
+        }
+        return {ok:true, id: itemId, status: newStatus};
+      }
+    }
+    return {ok:false, error:'temuan tidak ditemukan'};
+  } catch (e) { return {ok:false, error:String(e)}; }
+}
+function _verifyFinding(findingId, username, isAdmin, fields) {
+  return _verifyGeneric(SHEET_TEMUAN, 'ID Temuan', findingId, username, isAdmin, fields);
+}
+function _verifySafetyFinding(safetyId, username, isAdmin, fields) {
+  return _verifyGeneric(SHEET_SAFETY, 'ID Safety', safetyId, username, isAdmin, fields);
 }
 
 
@@ -1140,6 +1238,52 @@ function _savePhotos(photos, folder) {
 function _json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ============================================================
+//  PEMBERSIHAN DATA (jalankan MANUAL dari editor — TIDAK otomatis)
+// ============================================================
+// cleanseData(): HAPUS SELURUH baris data assessment/temuan/detail/safety/riwayat
+// (header baris 1 dipertahankan) + buang semua subfolder foto ke Trash Drive.
+// TIDAK menyentuh: tab Users, file config_master.json (form induk), header.
+// Foto masuk Trash Drive (bisa dipulihkan ±30 hari) — kosongkan Trash manual bila yakin.
+function cleanseData() {
+  var ss = _getSheet();
+  var tabs = [SHEET_DATA, SHEET_DETAIL, SHEET_TEMUAN, SHEET_SAFETY, SHEET_RIWAYAT];
+  var log = [];
+  tabs.forEach(function(name){
+    var sh = ss.getSheetByName(name);
+    if (!sh) { log.push(name + ': tab tidak ada, dilewati'); return; }
+    var last = sh.getLastRow();
+    if (last > 1) { sh.deleteRows(2, last - 1); log.push(name + ': ' + (last - 1) + ' baris data dihapus'); }
+    else { log.push(name + ': sudah kosong'); }
+  });
+  var folder = _getFolder();
+  var subs = folder.getFolders();
+  var nf = 0;
+  while (subs.hasNext()) { subs.next().setTrashed(true); nf++; }
+  log.push('Drive: ' + nf + ' subfolder foto dibuang ke Trash');
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+// cleanseFotoStandar(): kosongkan galeri Foto Standar & notifikasinya di config_master.json,
+// lalu naikkan versi config agar seluruh asesor menerima pembaruan. OPSIONAL.
+function cleanseFotoStandar() {
+  var cfg = _readConfig() || {};
+  cfg.fotoStandar = {};
+  cfg.fotoStandarNotif = [];
+  cfg.version = (cfg.version || 1) + 1;
+  _writeConfig(cfg);
+  Logger.log('fotoStandar & notif dikosongkan. Versi config -> ' + cfg.version);
+  return 'ok, versi -> ' + cfg.version;
+}
+// cleanseUsers(): HAPUS semua akun asesor di tab Users (header dipertahankan).
+// Pakai hanya bila akun-akun lama semuanya akun uji. OPSIONAL.
+function cleanseUsers() {
+  var sh = _usersSheet();
+  var last = sh.getLastRow();
+  if (last > 1) { sh.deleteRows(2, last - 1); Logger.log((last - 1) + ' akun dihapus'); return (last - 1) + ' akun dihapus'; }
+  Logger.log('Users sudah kosong'); return 'kosong';
 }
 
 // ============================================================

@@ -7,6 +7,15 @@ const LS_KEY='asesmen5r_v1';
 const AUTH_KEY='asesmen5r_auth';
 // Admin password (Fase 1: disimpan di kode; ganti sesuai kebutuhan)
 const ADMIN_PASS='admin5r';
+
+/* Akun Tim Tindak Lanjut (hardcode). PASSWORD = USERNAME.
+   Tiap akun terkunci ke 1 PU — hanya melihat & menutup temuan PU tersebut.
+   admin5r tetap super-user (semua PU). Tambah PU baru -> tambah entri di sini. */
+const FOLLOWUP_ACCOUNTS={
+  'tl-pug':{pu:'PUG',nama:'Tindak Lanjut PUG'},
+  'tl-puc':{pu:'PUC',nama:'Tindak Lanjut PUC'},
+  'tl-puj':{pu:'PUJ',nama:'Tindak Lanjut PUJ'}
+};
 // (P-uid) ASESOR_PASS DIHAPUS — asesor sekarang login dengan akun individual
 // (username + password sendiri, diverifikasi ke server). Lihat _loginUser di code.gs.
 
@@ -367,6 +376,10 @@ function retrySyncConfig(){checkRemoteConfig();}
 function render(){
   const auth=getAuth();
   if(!auth){renderLogin();return;}
+  const _ap=app();if(_ap)_ap.style.maxWidth=''; // reset lebar (modul Tindak Lanjut desktop mengubahnya)
+  // Tim Tindak Lanjut hanya boleh membuka modul TL + dashboard (view-only)
+  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety'].indexOf(VIEW)===-1){VIEW='tindaklanjut';}
+  if(VIEW==='tindaklanjut'&&(auth.role==='followup'||auth.role==='admin')){renderTindakLanjut();return;}
   if(VIEW==='admin'&&auth.role==='admin'){renderAdmin();return;}
   if(VIEW==='assess'&&DRAFT){renderAssess();return;}
   if(VIEW==='report'&&DRAFT){renderReport();return;}
@@ -388,6 +401,7 @@ function renderLogin(){
     <div class="tag">Audit Ringkas · Rapi · Resik · Rawat · Rajin — Direktorat Operasi</div>
     <div class="seg">
       <button class="${loginRole==='asesor'?'on':''}" onclick="loginRole='asesor';renderLogin()">Asesor</button>
+      <button class="${loginRole==='followup'?'on':''}" onclick="loginRole='followup';renderLogin()">Tindak Lanjut</button>
       <button class="${loginRole==='admin'?'on':''}" onclick="loginRole='admin';renderLogin()">Admin</button>
     </div>
     <div id="login-err"></div>
@@ -397,6 +411,12 @@ function renderLogin(){
       <label class="field"><span class="lbl">Kata Sandi</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••" autocomplete="current-password"></label>
       <p class="hint" style="color:rgba(255,255,255,.55);margin-top:-8px">Belum punya akun? Hubungi admin untuk didaftarkan.</p>
+    `:loginRole==='followup'?`
+      <label class="field"><span class="lbl">Username</span>
+        <input class="input" id="li-user" placeholder="mis. tl-pug" autocomplete="username"></label>
+      <label class="field"><span class="lbl">Kata Sandi</span>
+        <input class="input" id="li-pass" type="password" placeholder="••••••" autocomplete="current-password"></label>
+      <p class="hint" style="color:rgba(255,255,255,.55);margin-top:-8px">Akun tim tindak lanjut per Production Unit.</p>
     `:`
       <label class="field"><span class="lbl">Kata Sandi Administrator</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••"></label>
@@ -424,6 +444,14 @@ async function doLogin(){
     setAuth({role:'admin',name:'Admin'});VIEW='home';render();checkRemoteConfig();
     return;
   }
+  if(loginRole==='followup'){
+    const u=(($('#li-user')||{}).value||'').trim().toLowerCase();
+    const acc=FOLLOWUP_ACCOUNTS[u];
+    if(!acc||pass!==u){err.innerHTML='<div class="login-err">Username atau kata sandi salah.</div>';return;}
+    setAuth({role:'followup',name:acc.nama,username:u,pu:acc.pu});
+    VIEW='tindaklanjut';render();checkRemoteConfig();
+    return;
+  }
   // (P-uid) Login asesor: verifikasi username+password ke server (wajib online sekali di awal)
   const username=($('#li-user')||{}).value.trim();
   if(!username){err.innerHTML='<div class="login-err">Username wajib diisi.</div>';return;}
@@ -438,7 +466,7 @@ async function doLogin(){
     const out=await res.json();
     if(out.ok){
       setAuth({role:'asesor',name:out.namaLengkap||username,username});
-      VIEW='home';render();checkRemoteConfig();
+      VIEW='home';render();checkRemoteConfig();refreshAsrPending();
     }else{
       err.innerHTML='<div class="login-err">'+esc(out.error||'Login gagal.')+'</div>';
       if(btn){btn.disabled=false;btn.textContent='Masuk';}
@@ -472,13 +500,14 @@ function openDrawer(){
       <div class="rl">${esc(auth.role)}</div>
     </div>
     <div class="drawer-nav">
-      <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
+      ${auth.role!=='followup'?`<button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>`:''}
+      ${(auth.role==='admin'||auth.role==='followup')?`<button class="drawer-item" onclick="drawerGo('tindaklanjut')"><span class="di-ic">🛠️</span> Tindak Lanjut Temuan</button>`:''}
+      ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya${_asrPending?` <span style="background:var(--red);color:#fff;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:4px">${_asrPending}</span>`:''}</button>`:''}
       <button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>
       <button class="drawer-item" onclick="drawerGo('dashsafety')"><span class="di-ic">⚠️</span> Dashboard Safety (K3)</button>
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
-      ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya (Tindak Lanjut)</button>`:''}
-      ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
-      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulirulir & Butir Audit</button>`:''}
+      ${dft&&auth.role!=='followup'?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
+      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulir & Butir Audit</button>`:''}
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
     </div>
     <div class="drawer-foot">Assesment 5R · Direktorat Operasi</div>
@@ -493,8 +522,19 @@ function closeDrawer(){
 function drawerGo(view){
   closeDrawer();
   if(view==='admin'&&getAuth().role!=='admin')return;
+  if(_unsavedDrafts()&&!confirm(`Ada ${_unsavedDrafts()} perubahan belum dikirim ke Google. Tetap pindah halaman?`))return;
   VIEW=view;render();
 }
+/* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut + verifikasi Temuan Saya) */
+function _unsavedDrafts(){
+  var n=0;
+  try{n+=Object.keys(TL_DRAFT||{}).length;}catch(e){}
+  try{n+=Object.keys(VF_DRAFT||{}).length;}catch(e){}
+  return n;
+}
+window.addEventListener('beforeunload',function(e){
+  if(_unsavedDrafts()){e.preventDefault();e.returnValue='';}
+});
 function drawerResume(){closeDrawer();resumeDraft();}
 
 /* ---------- HOME ---------- */
@@ -556,6 +596,10 @@ function renderHome(){
   app().innerHTML=topbar('Assesment 5R','Selamat datang, '+auth.name)+`
   <div class="wrap">
     ${adminDirtyBanner}
+    ${(auth.role==='asesor'&&_asrPending)?`<div class="card" style="background:#FEF9EC;border:2px solid var(--amber);cursor:pointer" onclick="VIEW='temuansaya';render()">
+      <div style="font-weight:800;font-size:14px;color:#9A6B00">🔔 ${_asrPending} temuan menunggu verifikasi Anda</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:2px">Tim Tindak Lanjut sudah mengunggah bukti perbaikan. Ketuk untuk memverifikasi. ›</div>
+    </div>`:''}
     ${syncBanner}
     ${resumeHtml}
     <div class="card">
@@ -1265,7 +1309,6 @@ function renderAdmin(){
       <button class="${ADMIN_TAB==='matrix'?'on':''}" onclick="ADMIN_TAB='matrix';renderAdmin()">Formulir per Lokasi</button>
       <button class="${ADMIN_TAB==='fotostandar'?'on':''}" onclick="ADMIN_TAB='fotostandar';renderAdmin()">Foto Standar</button>
       <button class="${ADMIN_TAB==='target'?'on':''}" onclick="ADMIN_TAB='target';renderAdmin()">Target Nilai</button>
-      <button class="${ADMIN_TAB==='monitoring'?'on':''}" onclick="ADMIN_TAB='monitoring';renderAdmin()">Monitoring Temuan</button>
       <button class="${ADMIN_TAB==='users'?'on':''}" onclick="ADMIN_TAB='users';renderAdmin()">Kelola Asesor</button>
       <button class="${ADMIN_TAB==='sessions'?'on':''}" onclick="ADMIN_TAB='sessions';renderAdmin()">Data Tersimpan</button>
       <button class="${ADMIN_TAB==='data'?'on':''}" onclick="ADMIN_TAB='data';renderAdmin()">Pencadangan</button>
@@ -1278,7 +1321,7 @@ function renderAdmin(){
   else if(ADMIN_TAB==='matrix')b.innerHTML=admMatrix();
   else if(ADMIN_TAB==='fotostandar')b.innerHTML=admFotoStandar();
   else if(ADMIN_TAB==='target')b.innerHTML=admTarget();
-  else if(ADMIN_TAB==='monitoring'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Memuat data temuan…</div>';loadMonitoringTemuan();}
+  else if(ADMIN_TAB==='monitoring'){ADMIN_TAB='area';renderAdmin();return;} // dipindah ke modul Tindak Lanjut
   else if(ADMIN_TAB==='users'){b.innerHTML='<div class="empty"><div class="ic">⏳</div>Memuat daftar asesor…</div>';loadUserList();}
   else if(ADMIN_TAB==='sessions')b.innerHTML=admSessions();
   else b.innerHTML=admData();
@@ -2180,8 +2223,8 @@ function safetyMonRow(x){
   const id=x['ID Safety'];
   const st=x['Status']||'Open';
   const stColor=st==='Close'?'var(--green-400)':'var(--red)';
-  const isAdmin=(getAuth()||{}).role==='admin';
-  const head=`<div class="card" style="padding:14px">
+  // Dashboard Safety = VIEW-ONLY untuk semua. Penutupan dilakukan di modul Tindak Lanjut.
+  return `<div class="card" style="padding:14px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
       <span style="font-size:11px;font-weight:800;color:#fff;background:var(--red);padding:3px 9px;border-radius:6px">${esc(x['Kategori']||'')}</span>
       <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(st)}</span>
@@ -2189,47 +2232,12 @@ function safetyMonRow(x){
     <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''}</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Asesor: ${esc(x['Asesor']||'-')} · ${esc((x['Tanggal Temuan']||'').slice(0,10))}</div>
-    ${x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:''}`;
-  if(!isAdmin){
-    // VIEW-ONLY untuk non-admin
-    return head+`
+    ${x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:''}
     ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;margin-bottom:4px"><b>Tindak lanjut:</b> ${esc(x['Deskripsi Perbaikan'])}</div>`:''}
     ${x['Tgl Perbaikan']?`<div style="font-size:11px;color:var(--muted)">Selesai: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</div>`:''}
     ${x['Verifikator']?`<div style="font-size:11px;color:var(--muted)">Verifikator: ${esc(x['Verifikator'])}</div>`:''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
   </div>`;
-  }
-  return head+`
-    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="sm-dp-${id}" style="min-height:44px">${esc(x['Deskripsi Perbaikan']||'')}</textarea></label>
-    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="sm-tgl-${id}" type="date" value="${esc((x['Tgl Perbaikan']||'').slice(0,10))}"></label>
-    <label class="field"><span class="lbl">Status</span><select class="input" id="sm-st-${id}">
-      <option ${st==='Open'?'selected':''}>Open</option><option ${st==='Close'?'selected':''}>Close</option></select></label>
-    <label class="field"><span class="lbl">Verifikator</span><input class="input" id="sm-vf-${id}" value="${esc(x['Verifikator']||'')}" placeholder="Nama verifikator"></label>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
-      <button class="btn btn-primary btn-sm" style="flex:1" onclick="saveSafetyMon('${esc(id)}')">Simpan</button>
-    </div>
-  </div>`;
-}
-async function saveSafetyMon(id){
-  if((getAuth()||{}).role!=='admin'){toast('Hanya administrator yang dapat mengubah tindak lanjut');return;}
-  const fields={
-    'Deskripsi Perbaikan':$('#sm-dp-'+id).value.trim(),
-    'Tgl Perbaikan':$('#sm-tgl-'+id).value,
-    Status:$('#sm-st-'+id).value,
-    Verifikator:$('#sm-vf-'+id).value.trim()
-  };
-  toast('Sedang menyimpan…');
-  try{
-    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||'Admin'})});
-    const out=await res.json();
-    if(out.ok){
-      const t=(_dashSafetyData||[]).find(x=>x['ID Safety']===id);
-      if(t)Object.assign(t,fields);
-      toast('Tersimpan');drawDashSafety();
-    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
 async function viewSafetyPhoto(id){
   toast('Mengambil foto…');
@@ -2244,6 +2252,215 @@ async function viewSafetyPhoto(id){
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
   }catch(e){toast('Gagal mengambil foto');}
+}
+
+/* ============ MODUL TINDAK LANJUT TEMUAN (tim TL per-PU + admin) ============
+   Alur: Open -> (tl-pu isi perbaikan) -> Menunggu Verifikasi -> (asesor pembuat
+   verifikasi di "Temuan Saya") -> Close, atau ditolak -> balik Open + catatan.
+   tl-pu TIDAK bisa set Close (hanya admin, sebagai override).
+   Edit disimpan sebagai DRAF LOKAL (localStorage), lalu di-"Kirim ke Google" batch. */
+let TL={tab:'temuan',sel:null,status:'Open',pu:'',view:(function(){try{return localStorage.getItem('tl_viewmode')||'desktop';}catch(e){return 'desktop';}})()};
+let _tlFindings=null,_tlSafety=null;
+let TL_DRAFT=(function(){try{return JSON.parse(localStorage.getItem('tl_draft'))||{};}catch(e){return {};}})();
+function _tlSaveDraft(){try{localStorage.setItem('tl_draft',JSON.stringify(TL_DRAFT));}catch(e){toast('Penyimpanan penuh — kirim draf ke Google dulu');}}
+function tlDirtyCount(){return Object.keys(TL_DRAFT).length;}
+function tlDraftSet(id,type,key,val){
+  TL_DRAFT[id]=TL_DRAFT[id]||{_type:type};
+  TL_DRAFT[id][key]=val;_tlSaveDraft();
+  const c=$('#tl-kirim-btn');if(c)c.textContent=`⬆ Kirim ke Google (${tlDirtyCount()})`;
+  const m=document.getElementById('tl-mark-'+cssid(id));if(m)m.style.display='inline';
+}
+function cssid(s){return String(s).replace(/[^\w]/g,'_');}
+function tlV(x,key){const d=TL_DRAFT[tlId(x)];if(d&&Object.prototype.hasOwnProperty.call(d,key))return d[key];return x[key]||'';}
+
+function renderTindakLanjut(){
+  const auth=getAuth();
+  app().innerHTML=topbar('Tindak Lanjut Temuan',auth.role==='followup'?esc(auth.pu):'Semua PU')+`
+  <div class="wrap" id="tl-body"><div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div></div>
+  <div class="botbar" style="gap:8px">
+    <button class="btn btn-ghost" style="flex:.6" onclick="tlLeave()">${auth.role==='followup'?'Keluar':'‹ Beranda'}</button>
+    <button class="btn btn-primary" id="tl-kirim-btn" onclick="tlKirim()">⬆ Kirim ke Google (${tlDirtyCount()})</button>
+  </div>`;
+  if(TL.view==='desktop'){const a=app();if(a)a.style.maxWidth='1180px';}
+  loadTL();
+}
+function tlLeave(){
+  const auth=getAuth();
+  if(tlDirtyCount()&&!confirm(`Ada ${tlDirtyCount()} temuan dengan perubahan yang BELUM dikirim ke Google. Tetap keluar?`))return;
+  if(auth.role==='followup')logout();else{VIEW='home';render();}
+}
+async function loadTL(){
+  const b=$('#tl-body');if(!b)return;
+  if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  try{
+    const [rf,rs]=await Promise.all([
+      fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json()),
+      fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json())
+    ]);
+    _tlFindings=(rf&&rf.ok&&rf.findings)||[];
+    _tlSafety=(rs&&rs.ok&&rs.safety)||[];
+    drawTL();
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadTL()">Coba Lagi</button></div>`;}
+}
+function tlId(x){return TL.tab==='temuan'?x['ID Temuan']:x['ID Safety'];}
+function tlRows(){
+  const auth=getAuth();
+  const myPU=auth.role==='followup'?auth.pu:(TL.pu||'');
+  let rows=(TL.tab==='temuan'?_tlFindings:_tlSafety)||[];
+  if(myPU)rows=rows.filter(x=>x['PU']===myPU);
+  if(TL.status)rows=rows.filter(x=>(tlV(x,'Status')||'Open')===TL.status);
+  return rows;
+}
+function _daysSince(iso){if(!iso)return 0;const d=(Date.now()-new Date(iso).getTime())/86400000;return isNaN(d)?0:Math.floor(d);}
+function drawTL(){
+  const b=$('#tl-body');if(!b)return;
+  const auth=getAuth();
+  const allRows=(TL.tab==='temuan'?_tlFindings:_tlSafety)||[];
+  const puList=[...new Set(allRows.map(x=>x['PU']).filter(Boolean))].sort();
+  const rows=tlRows();
+  // banner notif: temuan mandek
+  const scope=auth.role==='followup'?allRows.filter(x=>x['PU']===auth.pu):(TL.pu?allRows.filter(x=>x['PU']===TL.pu):allRows);
+  const openBelum=scope.filter(x=>(x['Status']||'Open')==='Open').length;
+  const stuck=scope.filter(x=>x['Status']!=='Close'&&_daysSince(x['Update Terakhir'])>=7).length;
+
+  const bar=`
+  ${(openBelum||stuck)?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0;padding:11px 13px">
+    <div style="font-size:12.5px;font-weight:700;color:#9A6B00">
+      ${openBelum?`⚠️ ${openBelum} temuan masih Open (belum ditindaklanjuti).`:''}
+      ${stuck?`<br>⏱️ ${stuck} temuan mandek &gt; 7 hari.`:''}
+    </div></div>`:''}
+  <div class="card" style="padding:12px">
+    <div class="seg" style="background:var(--concrete);margin:0 0 10px">
+      <button class="${TL.tab==='temuan'?'on':''}" style="color:${TL.tab==='temuan'?'#fff':'var(--muted)'};background:${TL.tab==='temuan'?'var(--green)':'transparent'}" onclick="TL.tab='temuan';TL.sel=null;drawTL()">Temuan 5R</button>
+      <button class="${TL.tab==='safety'?'on':''}" style="color:${TL.tab==='safety'?'#fff':'var(--muted)'};background:${TL.tab==='safety'?'var(--green)':'transparent'}" onclick="TL.tab='safety';TL.sel=null;drawTL()">Safety (K3)</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select class="input" style="flex:1;min-width:120px" onchange="TL.status=this.value;TL.sel=null;drawTL()">
+        <option value="Open" ${TL.status==='Open'?'selected':''}>Status: Terbuka</option>
+        <option value="Menunggu Verifikasi" ${TL.status==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option>
+        <option value="Close" ${TL.status==='Close'?'selected':''}>Selesai</option>
+        <option value="" ${TL.status===''?'selected':''}>Seluruh Status</option>
+      </select>
+      ${auth.role==='admin'?`<select class="input" style="flex:1;min-width:120px" onchange="TL.pu=this.value;TL.sel=null;drawTL()">
+        <option value="">Seluruh PU</option>${puList.map(p=>`<option ${p===TL.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="tlToggleView()">${TL.view==='desktop'?'📱 Ponsel':'🖥️ Desktop'}</button>
+      <button class="btn btn-ghost btn-sm" onclick="tlRefresh()">Perbarui</button>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">${rows.length} temuan ditampilkan${tlDirtyCount()?` · <b style="color:var(--amber)">${tlDirtyCount()} draf belum dikirim</b>`:''}</div>
+  </div>`;
+
+  if(!rows.length){b.innerHTML=bar+'<div class="empty"><div class="ic">✓</div>Tidak ada temuan untuk filter ini.</div>';return;}
+
+  if(TL.view==='desktop'){
+    const sel=rows.find(x=>tlId(x)===TL.sel);
+    b.innerHTML=bar+`<div style="display:flex;gap:16px;align-items:flex-start">
+      <div style="width:330px;flex-shrink:0;max-height:64vh;overflow:auto">${rows.map(x=>tlListItem(x,true)).join('')}</div>
+      <div style="flex:1;min-width:0">${sel?tlFormHTML(sel):'<div class="card"><div class="empty" style="padding:30px 16px"><div class="ic">👈</div>Pilih temuan di daftar kiri.</div></div>'}</div>
+    </div>`;
+  }else{
+    b.innerHTML=bar+rows.map(x=>tlListItem(x,false)).join('');
+  }
+}
+function tlRefresh(){
+  if(tlDirtyCount()&&!confirm(`Ada ${tlDirtyCount()} draf belum dikirim. Perbarui data akan tetap menyimpan draf. Lanjut?`))return;
+  loadTL();
+}
+function tlToggleView(){
+  TL.view=TL.view==='desktop'?'ponsel':'desktop';
+  try{localStorage.setItem('tl_viewmode',TL.view);}catch(e){}
+  renderTindakLanjut();
+}
+function tlListItem(x,desktop){
+  const id=tlId(x), st=tlV(x,'Status')||'Open';
+  const stc=st==='Close'?'var(--green-400)':st==='Menunggu Verifikasi'?'var(--amber)':'var(--red)';
+  const kat=x['Kategori']||'';
+  const judul=(x['PU']||'')+' — '+(x['Lokasi']||'')+(x['Area']?' · '+x['Area']:(x['Lokasi Titik']?' · '+x['Lokasi Titik']:''));
+  const desk=(x['Deskripsi']||'').slice(0,desktop?70:110);
+  const selected=desktop&&id===TL.sel;
+  const dirty=!!TL_DRAFT[id];
+  return `<div onclick="tlSelect('${esc(id)}')" style="cursor:pointer;background:${selected?'#EAF5EC':'#fff'};border:1px solid ${selected?'var(--green-400)':'var(--line)'};border-radius:10px;padding:11px 12px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;color:#fff;background:${TL.tab==='safety'?'var(--red)':'var(--green-400)'}">${esc(kat.toUpperCase())}</span>
+      <span id="tl-mark-${cssid(id)}" style="display:${dirty?'inline':'none'};font-size:10px;font-weight:800;color:var(--amber)">● draf</span>
+      <span style="margin-left:auto;font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;color:#fff;background:${stc}">${esc(st)}</span>
+    </div>
+    <div style="font-size:12.5px;font-weight:700">${esc(judul)}</div>
+    <div style="font-size:11.5px;color:var(--muted)">${esc(desk)}${(x['Deskripsi']||'').length>desk.length?'…':''}</div>
+  </div>`;
+}
+function tlSelect(id){
+  TL.sel=id;
+  if(TL.view==='desktop'){drawTL();}
+  else{
+    const x=tlRows().find(r=>tlId(r)===id);if(!x)return;
+    $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${tlFormHTML(x)}</div></div>`;
+  }
+}
+function tlFormHTML(x){
+  const id=tlId(x), st=tlV(x,'Status')||'Open', isSafety=TL.tab==='safety';
+  const auth=getAuth();
+  const catV=tlV(x,'Catatan Verifikasi');
+  const draftFoto=(TL_DRAFT[id]||{})['Foto Perbaikan (DataURL)'];
+  const fotoBtn=isSafety
+    ? (x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
+    : (x['Folder Foto']?`<a href="${esc(x['Folder Foto'])}" target="_blank" class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px">Buka Folder Foto di Drive</a>`:'');
+  const statusOpts=`<option ${st==='Open'?'selected':''}>Open</option><option ${st==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option>${auth.role==='admin'?`<option ${st==='Close'?'selected':''}>Close</option>`:''}`;
+  return `<div class="card">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <h3 style="margin:0;font-size:16px">Tindak Lanjut</h3>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${st==='Close'?'var(--green-400)':st==='Menunggu Verifikasi'?'var(--amber)':'var(--red)'}">${esc(st)}</span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${isSafety?(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''):(x['Area']?' · '+esc(x['Area']):'')} · ${esc(x['Asesor']||'')}</div>
+    <div style="font-size:13px;background:#F7FAF8;border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">${esc(x['Deskripsi']||'(tanpa deskripsi)')}${x['Kategori']?` <span style="color:var(--muted)">[${esc(x['Kategori'])}]</span>`:''}</div>
+    ${catV&&st!=='Close'?`<div style="font-size:12.5px;background:#FBEEEC;border:1px solid #E6B0AA;border-radius:9px;padding:10px;margin-bottom:10px;color:var(--red)"><b>Ditolak verifikator:</b> ${esc(catV)}</div>`:''}
+    ${fotoBtn}
+    ${!isSafety?`<label class="field"><span class="lbl">Penyebab (Root Cause)</span>
+      <select class="input" onchange="tlDraftSet('${esc(id)}','temuan','Penyebab',this.value==='— pilih —'?'':this.value)">${['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya'].map(p=>`<option ${p===tlV(x,'Penyebab')?'selected':''}>${p||'— pilih —'}</option>`).join('')}</select></label>
+    <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" value="${esc(tlV(x,'Target'))}" oninput="tlDraftSet('${esc(id)}','temuan','Target',this.value)" placeholder="contoh: 2026"></label>`:''}
+    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut / Perbaikan</span><textarea class="input" style="min-height:60px" oninput="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Deskripsi Perbaikan',this.value)">${esc(tlV(x,'Deskripsi Perbaikan'))}</textarea></label>
+    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" type="date" value="${esc((tlV(x,'Tgl Perbaikan')||'').slice(0,10))}" onchange="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Tgl Perbaikan',this.value)"></label>
+    <label class="field"><span class="lbl">Foto Perbaikan (After)</span>
+      <div class="photo-row" id="tl-fotop-row">${draftFoto?`<img src="${draftFoto}" class="photo-thumb" onclick="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Foto Perbaikan (DataURL)','');drawTLForm('${esc(id)}')">`:`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="tlAddFotoP(this,'${esc(id)}','${isSafety?'safety':'temuan'}')"></label>`}</div>
+      <p class="hint" style="margin-top:4px">Kosongkan bila tidak mengubah foto.</p></label>
+    <label class="field"><span class="lbl">Status</span><select class="input" onchange="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Status',this.value)">${statusOpts}</select>
+      <p class="hint" style="margin-top:4px">Setelah perbaikan selesai, set <b>Menunggu Verifikasi</b> — asesor pembuat temuan yang akan menutup.</p></label>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
+      ${TL.view!=='desktop'?`<button class="btn btn-primary btn-sm" style="flex:1" onclick="closeModal();drawTL()">Selesai</button>`:''}
+    </div>
+    <p class="hint" style="margin-top:6px;text-align:center">Perubahan tersimpan otomatis sebagai draf. Tekan <b>Kirim ke Google</b> di bawah untuk mengunggah.</p>
+  </div>`;
+}
+function drawTLForm(id){
+  if(TL.view==='desktop'){drawTL();}
+  else{const x=tlRows().find(r=>tlId(r)===id);if(x)$('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${tlFormHTML(x)}</div></div>`;}
+}
+function tlAddFotoP(inp,id,type){
+  const f=inp.files[0];if(!f)return;inp.value='';
+  openCropper(f,cropped=>{handlePhoto(cropped,url=>{tlDraftSet(id,type,'Foto Perbaikan (DataURL)',url);drawTLForm(id);});});
+}
+async function tlKirim(){
+  const ids=Object.keys(TL_DRAFT);
+  if(!ids.length){toast('Tidak ada draf untuk dikirim');return;}
+  if(!confirm(`Kirim ${ids.length} temuan ke Google?`))return;
+  const btn=$('#tl-kirim-btn');if(btn){btn.disabled=true;}
+  let ok=0,gagal=0;
+  for(const id of ids){
+    const d=TL_DRAFT[id];const isSafety=d._type==='safety';
+    const fields={};for(const k in d){if(k!=='_type')fields[k]=d[k];}
+    try{
+      const body=isSafety
+        ? {secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||''}
+        : {secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||''};
+      const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
+      const out=await res.json();
+      if(out.ok){delete TL_DRAFT[id];_tlSaveDraft();ok++;}else{gagal++;}
+    }catch(e){gagal++;}
+    if(btn)btn.textContent=`⬆ Mengirim… (${ok}/${ids.length})`;
+  }
+  if(btn){btn.disabled=false;btn.textContent=`⬆ Kirim ke Google (${tlDirtyCount()})`;}
+  alert(`Selesai.\n\nBerhasil: ${ok}\nGagal: ${gagal}${gagal?'\n\nYang gagal tetap tersimpan sebagai draf, coba kirim lagi.':''}`);
+  loadTL();
 }
 
 /* ============ DASHBOARD NILAI (narik cloud, admin) ============ */
@@ -2701,18 +2918,30 @@ async function unmarkAsStandard(id){
     }else alert('GAGAL membatalkan status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
   }catch(e){alert('GAGAL memproses. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
-/* ===== (P-closing) TEMUAN SAYA — asesor menutup temuan miliknya sendiri =====
-   Beda dengan Monitoring Temuan (admin, semua temuan, field lengkap termasuk
-   Target/Penyebab), di sini asesor HANYA bisa mengubah temuan yang dia buat
-   sendiri (divalidasi di server via username), dan field yang bisa diubah
-   dibatasi: foto perbaikan (after), deskripsi tindak lanjut, tanggal, status. */
-let _myFindingsData=null;
-let MY_FINDING_FILTER='Open';
+/* ===== TEMUAN SAYA — asesor MEMVERIFIKASI perbaikan atas temuan yang IA buat =====
+   Asesor tidak lagi mengisi perbaikan (itu tugas tim TL). Di sini asesor:
+   - melihat status semua temuan yang ia buat
+   - untuk yang "Menunggu Verifikasi": cek bukti tim TL lalu Setujui (Close) /
+     Tolak (balik Open + catatan). Keputusan disimpan sbg draf lalu Kirim batch. */
+let _mfFindings=null,_mfSafety=null;
+let MF_FILTER='verif';
+let VF_DRAFT=(function(){try{return JSON.parse(localStorage.getItem('vf_draft'))||{};}catch(e){return {};}})();
+function _vfSave(){try{localStorage.setItem('vf_draft',JSON.stringify(VF_DRAFT));}catch(e){}}
+function vfDirtyCount(){return Object.keys(VF_DRAFT).length;}
+let _asrPending=0; // jumlah temuan menunggu verifikasi asesor (badge)
+
 function renderTemuanSaya(){
-  app().innerHTML=topbar('Temuan Saya','Tindak lanjut & closing temuan Anda')+`
+  app().innerHTML=topbar('Temuan Saya','Verifikasi tindak lanjut temuan Anda')+`
   <div class="wrap" id="mf-body"><div class="empty"><div class="ic">⏳</div>Memuat temuan Anda…</div></div>
-  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Beranda</button></div>`;
+  <div class="botbar" style="gap:8px">
+    <button class="btn btn-ghost" style="flex:.6" onclick="mfLeave()">‹ Beranda</button>
+    <button class="btn btn-primary" id="mf-kirim-btn" onclick="vfKirim()">⬆ Kirim ke Google (${vfDirtyCount()})</button>
+  </div>`;
   loadMyFindings();
+}
+function mfLeave(){
+  if(vfDirtyCount()&&!confirm(`Ada ${vfDirtyCount()} keputusan verifikasi BELUM dikirim ke Google. Tetap keluar?`))return;
+  VIEW='home';render();
 }
 async function loadMyFindings(){
   const b=$('#mf-body');if(!b)return;
@@ -2720,102 +2949,134 @@ async function loadMyFindings(){
   if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
   if(!auth.username){b.innerHTML='<div class="empty">Sesi tidak valid — silakan keluar dan masuk kembali.</div>';return;}
   try{
-    const res=await fetch(SYNC_URL+'?action=myFindings&username='+encodeURIComponent(auth.username)+'&secret='+encodeURIComponent(SYNC_SECRET));
-    const out=await res.json();
-    if(!out.ok){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
-    _myFindingsData=out.findings||[];
+    const [rf,rs]=await Promise.all([
+      fetch(SYNC_URL+'?action=myFindings&username='+encodeURIComponent(auth.username)+'&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json()),
+      fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json())
+    ]);
+    _mfFindings=(rf&&rf.ok&&rf.findings)||[];
+    _mfSafety=((rs&&rs.ok&&rs.safety)||[]).filter(x=>x['Asesor Username']===auth.username);
+    _asrPending=[..._mfFindings,..._mfSafety].filter(x=>(x['Status']||'')==='Menunggu Verifikasi').length;
     renderMyFindingsList();
-  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Mohon periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadMyFindings()">Coba Lagi</button></div>`;}
+  }catch(e){b.innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="loadMyFindings()">Coba Lagi</button></div>`;}
 }
+function mfId(x){return x['ID Temuan']||x['ID Safety'];}
+function mfType(x){return x['ID Safety']?'safety':'temuan';}
 function renderMyFindingsList(){
   const b=$('#mf-body');if(!b)return;
-  let rows=_myFindingsData||[];
-  if(MY_FINDING_FILTER)rows=rows.filter(x=>(x['Status']||'Open')===MY_FINDING_FILTER);
+  const all=[..._mfFindings||[],...(_mfSafety||[])];
+  const eff=x=>{const d=VF_DRAFT[mfId(x)];return d&&d.Status?d.Status:(x['Status']||'Open');};
+  let rows;
+  if(MF_FILTER==='verif')rows=all.filter(x=>(x['Status']||'')==='Menunggu Verifikasi');
+  else if(MF_FILTER==='open')rows=all.filter(x=>eff(x)==='Open');
+  else if(MF_FILTER==='close')rows=all.filter(x=>eff(x)==='Close');
+  else rows=all;
+  const pend=all.filter(x=>(x['Status']||'')==='Menunggu Verifikasi').length;
   b.innerHTML=`<div class="card">
     <h2>Temuan yang Anda Buat</h2>
-    <p class="hint">Unggah foto perbaikan (after) dan tandai selesai untuk temuan yang sudah ditindaklanjuti di lapangan.</p>
+    <p class="hint">Tim Tindak Lanjut mengerjakan perbaikan. Anda yang <b>memverifikasi</b> apakah sudah sesuai.${vfDirtyCount()?` <span style="color:var(--amber);font-weight:700">${vfDirtyCount()} keputusan belum dikirim.</span>`:''}</p>
     <div class="seg" style="background:var(--concrete);margin:0">
-      <button class="${MY_FINDING_FILTER==='Open'?'on':''}" style="color:${MY_FINDING_FILTER==='Open'?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER==='Open'?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='Open';renderMyFindingsList()">Terbuka</button>
-      <button class="${MY_FINDING_FILTER==='Close'?'on':''}" style="color:${MY_FINDING_FILTER==='Close'?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER==='Close'?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='Close';renderMyFindingsList()">Selesai</button>
-      <button class="${MY_FINDING_FILTER===''?'on':''}" style="color:${MY_FINDING_FILTER===''?'#fff':'var(--muted)'};background:${MY_FINDING_FILTER===''?'var(--green)':'transparent'}" onclick="MY_FINDING_FILTER='';renderMyFindingsList()">Semua</button>
+      <button class="${MF_FILTER==='verif'?'on':''}" style="color:${MF_FILTER==='verif'?'#fff':'var(--muted)'};background:${MF_FILTER==='verif'?'var(--green)':'transparent'}" onclick="MF_FILTER='verif';renderMyFindingsList()">Perlu Verifikasi${pend?` (${pend})`:''}</button>
+      <button class="${MF_FILTER==='open'?'on':''}" style="color:${MF_FILTER==='open'?'#fff':'var(--muted)'};background:${MF_FILTER==='open'?'var(--green)':'transparent'}" onclick="MF_FILTER='open';renderMyFindingsList()">Terbuka</button>
+      <button class="${MF_FILTER==='close'?'on':''}" style="color:${MF_FILTER==='close'?'#fff':'var(--muted)'};background:${MF_FILTER==='close'?'var(--green)':'transparent'}" onclick="MF_FILTER='close';renderMyFindingsList()">Selesai</button>
     </div>
   </div>
-  ${rows.length?rows.map(x=>myFindingRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak ada temuan pada kategori ini.</div>'}`;
-  rows.forEach(x=>{if(x['_adaFotoPerbaikan'])_loadMyFindingPhotoIfAny(x['ID Temuan']);});
+  ${rows.length?rows.map(x=>mfRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak ada temuan pada kategori ini.</div>'}`;
 }
-function myFindingRow(x){
-  const id=x['ID Temuan'];
-  const stColor=x['Status']==='Close'?'var(--green-400)':'var(--red)';
-  const adaFotoP=!!x['_adaFotoPerbaikan'];
+function mfRow(x){
+  const id=mfId(x), isSafety=mfType(x)==='safety';
+  const srvSt=x['Status']||'Open';
+  const draft=VF_DRAFT[id];
+  const eff=draft&&draft.Status?draft.Status:srvSt;
+  const stc=eff==='Close'?'var(--green-400)':eff==='Menunggu Verifikasi'?'var(--amber)':'var(--red)';
+  const perluVerif=srvSt==='Menunggu Verifikasi';
   return `<div class="card" style="padding:14px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
-      <span class="tag5r t-${x['Kategori']}">${(x['Kategori']||'').toUpperCase()}</span>
-      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stColor}">${esc(x['Status']||'Open')}</span>
+      <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;color:#fff;background:${isSafety?'var(--red)':'var(--green-400)'}">${esc((x['Kategori']||'').toUpperCase())}</span>
+      ${isSafety?'<span style="font-size:9px;font-weight:800;color:var(--muted)">SAFETY</span>':''}
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(eff)}${draft?' *':''}</span>
     </div>
-    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')} · ${esc(x['Area']||'')}</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['Deskripsi']||'')}</div>
-    <div class="finding" style="margin:0 0 10px">
-      <div class="finding-lbl">Foto Perbaikan (After)</div>
-      <div class="photo-row" id="mf-photo-${id}">
-        ${adaFotoP?`<img class="photo-thumb" id="mf-img-${id}" src="" data-loaded="0" onclick="zoomFotoAcuan(this.src)">`:`<label class="photo-add"><span id="mf-plus-${id}">+</span><input type="file" accept="image/*" capture="environment" style="display:none" onchange="addMyFindingPhoto('${esc(id)}',this)"></label>`}
-      </div>
-    </div>
-    <label class="field"><span class="lbl">Deskripsi Tindak Lanjut</span><textarea class="input" id="mf-deskp-${id}" style="min-height:44px">${esc(x['Deskripsi Perbaikan']||'')}</textarea></label>
-    <label class="field"><span class="lbl">Tanggal Penyelesaian</span><input class="input" id="mf-tglp-${id}" type="date" value="${esc((x['Tgl Perbaikan']||'').slice(0,10))}"></label>
-    <label class="field"><span class="lbl">Status</span><select class="input" id="mf-status-${id}">
-      <option ${x['Status']==='Open'?'selected':''}>Open</option><option ${x['Status']==='Close'?'selected':''}>Close</option></select></label>
-    <button class="btn btn-primary btn-block btn-sm" onclick="saveMyFinding('${esc(id)}')">Simpan</button>
+    <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Area']?' · '+esc(x['Area']):(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):'')}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
+    ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;background:#F7FAF8;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px"><b>Tindak lanjut tim TL:</b> ${esc(x['Deskripsi Perbaikan'])}${x['Tgl Perbaikan']?`<br><span style="color:var(--muted)">Tgl: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</span>`:''}</div>`:''}
+    ${(x['_adaFotoTemuan']||x['_adaFotoPerbaikan'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewBeforeAfter('${esc(id)}',${isSafety})">Lihat Foto Before / After</button>`:''}
+    ${perluVerif?`
+      ${draft?`<div style="font-size:12px;text-align:center;color:${draft.Status==='Close'?'var(--green-400)':'var(--red)'};font-weight:700;margin-bottom:6px">${draft.Status==='Close'?'✔ Akan disetujui (Close)':'✘ Akan ditolak'}${draft['Catatan Verifikasi']?' — '+esc(draft['Catatan Verifikasi']):''} · <a onclick="delete VF_DRAFT['${esc(id)}'];_vfSave();renderMyFindingsList();updateKirimBtn()" style="color:var(--green);cursor:pointer">batalkan</a></div>`:`
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-danger btn-sm" style="flex:1" onclick="mfTolak('${esc(id)}','${mfType(x)}')">✘ Belum sesuai</button>
+        <button class="btn btn-primary btn-sm" style="flex:1" onclick="mfSetuju('${esc(id)}','${mfType(x)}')">✔ Sesuai · Tutup</button>
+      </div>`}
+    `:`
+      ${srvSt==='Open'?`<div style="font-size:11px;color:var(--muted)">${x['Catatan Verifikasi']?'Dikembalikan — menunggu revisi tim TL.':'Sedang ditindaklanjuti tim TL.'}</div>`:''}
+      ${srvSt==='Close'?`<div style="font-size:11px;color:var(--green-400)">Selesai & terverifikasi${x['Verifikator']?' oleh '+esc(x['Verifikator']):''}.</div>`:''}
+    `}
+    <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
   </div>`;
 }
-/* Muat foto perbaikan yang sudah ada (kalau ada) secara on-demand, sama pola dengan Dashboard Cloud */
-async function _loadMyFindingPhotoIfAny(id){
-  const img=document.getElementById('mf-img-'+id);
-  if(!img||img.dataset.loaded==='1')return;
+function updateKirimBtn(){const c=$('#mf-kirim-btn');if(c)c.textContent=`⬆ Kirim ke Google (${vfDirtyCount()})`;}
+function mfSetuju(id,type){
+  VF_DRAFT[id]={_type:type,Status:'Close',Verifikator:getAuth().name||''};
+  _vfSave();renderMyFindingsList();updateKirimBtn();
+}
+function mfTolak(id,type){
+  const c=prompt('Alasan belum sesuai (wajib) — akan dikirim ke tim Tindak Lanjut:');
+  if(c==null)return;
+  if(!c.trim()){toast('Catatan wajib diisi');return;}
+  VF_DRAFT[id]={_type:type,Status:'Open','Catatan Verifikasi':c.trim(),Verifikator:getAuth().name||''};
+  _vfSave();renderMyFindingsList();updateKirimBtn();
+}
+async function viewBeforeAfter(id,isSafety){
+  toast('Mengambil foto…');
   try{
-    const res=await fetch(SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET));
-    const out=await res.json();
-    if(out.ok&&out.fotoPerbaikan){img.src=out.fotoPerbaikan;img.dataset.loaded='1';}
-  }catch(e){/* diam saja — asesor masih bisa upload foto baru walau gagal memuat yang lama */}
+    const url=isSafety
+      ? SYNC_URL+'?action=safetyPhotos&safetyId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET)
+      : SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET);
+    const out=await(await fetch(url)).json();
+    if(!out.ok){toast('Gagal mengambil foto');return;}
+    $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+      <h3>Foto Before / After</h3>
+      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">BEFORE (TEMUAN)</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">AFTER (PERBAIKAN)</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:'<p class="hint">Tim TL belum mengunggah foto perbaikan.</p>'}
+      <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
+    </div></div>`;
+  }catch(e){toast('Gagal mengambil foto');}
 }
-function addMyFindingPhoto(id,inp){
-  const f=inp.files[0];if(!f)return;
-  inp.value='';
-  openCropper(f,cropped=>{
-  handlePhoto(cropped,url=>{
-    window._myFindingPhoto=window._myFindingPhoto||{};
-    window._myFindingPhoto[id]=url;
-    const row=$('#mf-photo-'+id);
-    row.innerHTML=`<img class="photo-thumb" src="${url}" onclick="zoomFotoAcuan(this.src)">`;
-    toast('Foto siap — ketuk Simpan untuk mengirim');
-  });
-  });
-}
-async function saveMyFinding(id){
+async function vfKirim(){
+  const ids=Object.keys(VF_DRAFT);
+  if(!ids.length){toast('Tidak ada keputusan untuk dikirim');return;}
+  if(!confirm(`Kirim ${ids.length} keputusan verifikasi ke Google?`))return;
   const auth=getAuth();
-  const fields={
-    'Deskripsi Perbaikan':$('#mf-deskp-'+id).value.trim(),
-    'Tgl Perbaikan':$('#mf-tglp-'+id).value,
-    'Status':$('#mf-status-'+id).value,
-    'Verifikator':auth.name||''
-  };
-  if(window._myFindingPhoto&&window._myFindingPhoto[id]){
-    fields['Foto Perbaikan (DataURL)']=window._myFindingPhoto[id];
+  const btn=$('#mf-kirim-btn');if(btn)btn.disabled=true;
+  let ok=0,gagal=0;
+  for(const id of ids){
+    const d=VF_DRAFT[id];const isSafety=d._type==='safety';
+    const fields={Status:d.Status,Verifikator:d.Verifikator||auth.name||''};
+    if(d['Catatan Verifikasi'])fields['Catatan Verifikasi']=d['Catatan Verifikasi'];
+    else fields['Catatan Verifikasi']=''; // approve -> bersihkan catatan penolakan lama
+    try{
+      const body={secret:SYNC_SECRET,type:isSafety?'verifySafetyFinding':'verifyFinding',username:auth.username,fields};
+      if(isSafety)body.safetyId=id;else body.findingId=id;
+      const out=await(await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)})).json();
+      if(out.ok){delete VF_DRAFT[id];_vfSave();ok++;}else{gagal++;}
+    }catch(e){gagal++;}
+    if(btn)btn.textContent=`⬆ Mengirim… (${ok}/${ids.length})`;
   }
-  if(fields['Status']==='Close'&&!fields['Deskripsi Perbaikan']){
-    toast('⚠️ Mohon isi deskripsi tindak lanjut sebelum menandai selesai');
-    return;
-  }
-  toast('Sedang menyimpan…');
+  if(btn){btn.disabled=false;btn.textContent=`⬆ Kirim ke Google (${vfDirtyCount()})`;}
+  alert(`Selesai.\n\nBerhasil: ${ok}\nGagal: ${gagal}`);
+  loadMyFindings();
+}
+async function refreshAsrPending(){
+  const auth=getAuth();
+  if(!auth||auth.role!=='asesor'||!auth.username||!SYNC_URL)return;
   try{
-    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({secret:SYNC_SECRET,type:'updateMyFinding',findingId:id,username:auth.username,fields})});
-    const out=await res.json();
-    if(out.ok){
-      const t=(_myFindingsData||[]).find(x=>x['ID Temuan']===id);
-      if(t)Object.assign(t,fields);
-      toast('Tersimpan');loadMyFindings();
-    }else alert('GAGAL menyimpan.\n\nPenyebab: '+(out.error||'tidak diketahui'));
-  }catch(e){alert('GAGAL menyimpan. Mohon periksa sinyal.\n\nRincian: '+e.message);}
+    const [rf,rs]=await Promise.all([
+      fetch(SYNC_URL+'?action=myFindings&username='+encodeURIComponent(auth.username)+'&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json()),
+      fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json())
+    ]);
+    const f=(rf&&rf.ok&&rf.findings)||[];
+    const s=((rs&&rs.ok&&rs.safety)||[]).filter(x=>x['Asesor Username']===auth.username);
+    _asrPending=[...f,...s].filter(x=>(x['Status']||'')==='Menunggu Verifikasi').length;
+    if(VIEW==='home')renderHome();
+  }catch(e){}
 }
 
 function renderDashboard(){
@@ -2899,23 +3160,8 @@ function renderDashboard(){
       <p class="hint">Kategori penyebab yang dicatat asesor saat melengkapi temuan — membantu tindak lanjut yang mencegah temuan berulang, bukan sekadar perbaikan sesaat.</p>
       ${barChart(byPenyebab)}</div>`:''}
 
-    ${DASH_SRC==='cloud'&&auth.role==='admin'?`<div class="card"><h2>Kelola Status Temuan</h2>
-      <p class="hint">Ketuk salah satu temuan untuk melihat dan mengubah rincian. Hanya dapat dilakukan oleh administrator. Perubahan tersimpan ke Google.</p>
-      ${F.map(x=>{const stc=x.status==='Close'?'var(--green-400)':'var(--red)';
-        return `<div class="card" style="padding:13px;margin-bottom:8px;cursor:pointer" onclick="openCloudFinding('${esc(x.id)}')">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-          <span class="tag5r t-${x.kategori}">${(x.kategori||'').toUpperCase()}</span>
-          ${x.berulang==='Ya'?'<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px">BERULANG</span>':''}
-          <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(x.status)}</span>
-        </div>
-        <div style="font-weight:700;font-size:13px">${esc(x.pu)} — ${esc(x.loc)}</div>
-        <div style="font-size:12px;color:var(--ink);font-weight:600">${esc(x.area||'')}</div>
-        <div style="font-size:12px;color:var(--muted)">${esc((x.deskripsi||'').slice(0,90))}${(x.deskripsi||'').length>90?'…':''}</div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-          <span style="font-size:11px;color:var(--green);font-weight:700">Ketuk untuk rincian ›</span>
-          ${x['Folder Foto']?'<span style="font-size:11px;color:var(--amber);font-weight:700">📷 terdapat foto</span>':''}
-        </div>
-      </div>`;}).join('')}
+    ${DASH_SRC==='cloud'&&auth.role==='admin'?`<div class="card" style="background:#F4F8F5">
+      <p class="hint" style="margin:0">Penutupan & tindak lanjut temuan dikerjakan di menu <b>Tindak Lanjut Temuan</b> (☰).</p>
     </div>`:''}
 
     <div class="card"><button class="btn btn-ghost btn-block" onclick="exportDashCSV()">Unduh Rekapitulasi (CSV)</button>${DASH_SRC==='cloud'?'<button class="btn btn-ghost btn-block" style="margin-top:8px" onclick="loadDashCloud()">Perbarui dari Google</button>':''}</div>
