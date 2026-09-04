@@ -377,8 +377,9 @@ function render(){
   const auth=getAuth();
   if(!auth){renderLogin();return;}
   const _ap=app();if(_ap)_ap.style.maxWidth=''; // reset lebar (modul Tindak Lanjut desktop mengubahnya)
+  if(VIEW==='panduan'){renderPanduan();return;}
   // Tim Tindak Lanjut hanya boleh membuka modul TL + dashboard (view-only)
-  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety'].indexOf(VIEW)===-1){VIEW='tindaklanjut';}
+  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety','panduan'].indexOf(VIEW)===-1){VIEW='tindaklanjut';}
   if(VIEW==='tindaklanjut'&&(auth.role==='followup'||auth.role==='admin')){renderTindakLanjut();return;}
   if(VIEW==='admin'&&auth.role==='admin'){renderAdmin();return;}
   if(VIEW==='assess'&&DRAFT){renderAssess();return;}
@@ -485,10 +486,12 @@ function topbar(title,sub){
     <img src="${LOGO_5R}" alt="5R" class="topbar-logo">
     <div><div class="ttl">${esc(title)}</div><div class="sub">${esc(sub||'')}</div></div>
     <div class="right">
-      <span class="chip">${esc(auth.role)}</span>
+      <span class="chip">${esc(_roleLabel(auth.role))}</span>
+      <button class="icon-btn" onclick="openPanduan()" title="Panduan Penggunaan" style="font-weight:800;border:1.5px solid rgba(255,255,255,.4);border-radius:50%;width:24px;height:24px;font-size:13px;line-height:1">?</button>
       <button class="icon-btn" onclick="logout()" title="Keluar">⏻</button>
     </div></div>`;
 }
+function _roleLabel(r){return r==='followup'?'tindak lanjut':r==='asesor'?'asesor':r==='admin'?'admin':(r||'');}
 function openDrawer(){
   const auth=getAuth();if(!auth)return;
   const dft=loadDraft();
@@ -508,6 +511,7 @@ function openDrawer(){
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
       ${dft&&auth.role!=='followup'?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulir & Butir Audit</button>`:''}
+      <button class="drawer-item" onclick="closeDrawer();openPanduan()"><span class="di-ic">📘</span> Panduan Penggunaan</button>
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
     </div>
     <div class="drawer-foot">Assesment 5R · Direktorat Operasi</div>
@@ -595,6 +599,13 @@ function renderHome(){
 
   app().innerHTML=topbar('Assesment 5R','Selamat datang, '+auth.name)+`
   <div class="wrap">
+    ${_panduanSeen()?'':`<div class="card" style="border:1.5px solid var(--green-400);display:flex;align-items:center;gap:12px">
+      <span style="font-size:22px">📘</span>
+      <div style="flex:1"><div style="font-weight:700;font-size:13px">Panduan Penggunaan</div>
+      <div style="font-size:12px;color:var(--muted)">Langkah kerja sesuai peran Anda tersedia di sini.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openPanduan()">Buka</button>
+      <button class="icon-btn" style="color:var(--muted);font-size:18px" onclick="_panduanDismiss()" title="Sembunyikan">×</button>
+    </div>`}
     ${adminDirtyBanner}
     ${(auth.role==='asesor'&&_asrPending)?`<div class="card" style="background:#FEF9EC;border:2px solid var(--amber);cursor:pointer" onclick="VIEW='temuansaya';render()">
       <div style="font-weight:800;font-size:14px;color:#9A6B00">🔔 ${_asrPending} temuan menunggu verifikasi Anda</div>
@@ -652,6 +663,143 @@ function renderHome(){
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='dashsafety';render()">Dashboard Safety (K3)</button>
     <button class="btn btn-ghost btn-block" onclick="VIEW='dashboard';render()">Dashboard Analisis Temuan</button>
   </div>`;
+}
+
+/* ========================= PANDUAN PENGGUNAAN (per peran) ========================= */
+let PANDUAN_FROM='home';
+function _panduanSeen(){try{return localStorage.getItem('panduan_seen')==='1';}catch(e){return false;}}
+function _panduanDismiss(){try{localStorage.setItem('panduan_seen','1');}catch(e){}renderHome();}
+function openPanduan(){
+  if(VIEW==='panduan')return;
+  PANDUAN_FROM=VIEW||'home';
+  try{localStorage.setItem('panduan_seen','1');}catch(e){}
+  VIEW='panduan';render();
+}
+function panduanFlowSVG(role){
+  // role: 'asesor' | 'followup' | 'admin' — kotak yang jadi tugasnya disorot
+  const hi='#0B3D2E', dim='#9DB0A6', lime='#39B54A';
+  const c1=(role==='asesor')?hi:dim, c2=(role==='followup')?hi:dim, c3=(role==='asesor')?hi:dim;
+  const adm=(role==='admin')?hi:dim;
+  function box(y,c,t1,t2){return `
+    <rect x="40" y="${y}" width="240" height="46" rx="9" fill="#fff" stroke="${c}" stroke-width="${c===hi?2.5:1.5}"/>
+    <text x="160" y="${y+19}" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${t1}</text>
+    <text x="160" y="${y+35}" text-anchor="middle" font-size="10.5" fill="#6B7A72">${t2}</text>`;}
+  function arrow(y){return `<line x1="160" y1="${y}" x2="160" y2="${y+18}" stroke="#9DB0A6" stroke-width="1.5" marker-end="url(#ar)"/>`;}
+  return `<svg viewBox="0 0 320 330" style="width:100%;max-width:340px;display:block;margin:6px auto">
+    <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="5" refY="4" orient="auto"><path d="M0 0 L6 4 L0 8 z" fill="#9DB0A6"/></marker></defs>
+    ${box(8,c1,'1 · ASESOR','Menilai 5R & mencatat temuan')}
+    ${arrow(54)}
+    ${box(80,c2,'2 · TIM TINDAK LANJUT','Perbaikan + unggah foto bukti')}
+    ${arrow(126)}
+    ${box(152,c3,'3 · ASESOR (pembuat)','Verifikasi bukti perbaikan')}
+    <line x1="110" y1="198" x2="90" y2="232" stroke="#9DB0A6" stroke-width="1.5" marker-end="url(#ar)"/>
+    <text x="70" y="222" font-size="9.5" fill="#1E7A5A" font-weight="700">Sesuai</text>
+    <line x1="210" y1="198" x2="230" y2="215" stroke="#C0392B" stroke-width="1.5"/>
+    <path d="M230 215 Q 292 155 288 90 L 282 80" fill="none" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
+    <text x="250" y="210" font-size="9.5" fill="#C0392B" font-weight="700">Belum</text>
+    <rect x="40" y="236" width="150" height="40" rx="9" fill="#EAF5EC" stroke="${lime}" stroke-width="1.5"/>
+    <text x="115" y="253" text-anchor="middle" font-size="12" font-weight="800" fill="#0B3D2E">SELESAI</text>
+    <text x="115" y="268" text-anchor="middle" font-size="10" fill="#1E7A5A">Status: Close</text>
+    <rect x="40" y="290" width="240" height="34" rx="9" fill="#fff" stroke="${adm}" stroke-width="${adm===hi?2.5:1.5}" stroke-dasharray="5 3"/>
+    <text x="160" y="311" text-anchor="middle" font-size="10.5" font-weight="700" fill="${adm}">ADMIN — memantau seluruh proses</text>
+  </svg>`;
+}
+function _panduanRole(role){
+  if(role==='followup')return{
+    judul:'Peran Anda: Tim Tindak Lanjut',
+    ring:'Anda menindaklanjuti temuan pada Production Unit Anda — melakukan perbaikan, mendokumentasikan bukti, lalu mengajukan verifikasi kepada asesor pembuat temuan. Penutupan temuan bukan wewenang Anda.',
+    langkah:[
+      'Buka menu <b>Tindak Lanjut Temuan</b>. Daftar yang tampil hanya temuan Production Unit Anda. Tersedia dua tab: <b>Temuan 5R</b> dan <b>Safety (K3)</b>.',
+      'Pilih satu temuan. Isi penyebab, target penyelesaian, deskripsi perbaikan, tanggal penyelesaian, dan unggah <b>foto perbaikan (after)</b>.',
+      'Setelah perbaikan tuntas, ubah <b>Status</b> menjadi <b>Menunggu Verifikasi</b>. Asesor pembuat temuan yang akan memutuskan penutupan.',
+      'Setiap perubahan otomatis tersimpan sebagai draf (ditandai <b>● draf</b>) pada perangkat ini. Tekan <b>Kirim ke Google</b> di bagian bawah untuk mengunggah seluruh draf sekaligus.',
+      'Jika temuan kembali berstatus <b>Open</b> disertai kotak merah "Ditolak verifikator", perbaiki sesuai catatan yang diberikan, kemudian ajukan verifikasi ulang.',
+      'Gunakan tombol <b>Tampilan Desktop / Ponsel</b> di bagian atas untuk menyesuaikan dengan perangkat yang Anda pakai.'
+    ],
+    faq:[
+      ['Mengapa tidak ada pilihan "Close"?','Penutupan temuan adalah kewenangan asesor yang membuat temuan. Anda mengajukan, asesor memutuskan.'],
+      ['Draf hilang bila browser ditutup?','Tidak. Draf tersimpan pada perangkat. Namun selama belum ditekan "Kirim ke Google", data belum masuk sistem dan belum terlihat oleh asesor.'],
+      ['Bisa mengerjakan beberapa temuan sekaligus?','Bisa. Kerjakan satu per satu, semuanya tersimpan sebagai draf, lalu kirim sekali di akhir.']
+    ]
+  };
+  if(role==='admin')return{
+    judul:'Peran Anda: Administrator',
+    ring:'Anda mengelola formulir dan akun asesor, serta memantau progres tindak lanjut. Anda tidak menangani tindak lanjut harian, tetapi dapat mengambil alih bila diperlukan.',
+    langkah:[
+      '<b>Kelola Formulir & Butir Audit</b> — atur area pemeriksaan, formulir per lokasi, foto standar, dan target nilai. Setelah mengubah, tekan "Sinkronkan Formulir ke Seluruh Asesor" agar perubahan diterima seluruh asesor.',
+      '<b>Kelola Asesor</b> — daftarkan akun asesor baru, reset kata sandi, serta mengaktifkan atau menonaktifkan akun.',
+      '<b>Memantau</b> — melalui Dashboard Nilai (realisasi terhadap target), Dashboard Safety (K3), dan Dashboard Analisis Temuan. Perhatikan penanda "temuan mandek lebih dari 7 hari".',
+      '<b>Mengambil alih (bila perlu)</b> — melalui menu Tindak Lanjut Temuan, Anda dapat memilih Production Unit mana pun. Sebagai pengecualian, opsi Status "Close" tersedia untuk Anda apabila asesor pembuat temuan berhalangan.'
+    ],
+    faq:[
+      ['Siapa yang menutup temuan?','Idealnya asesor yang membuat temuan tersebut. Administrator hanya bertindak sebagai cadangan.'],
+      ['Bagaimana menghapus data uji sebelum penggunaan resmi?','Melalui editor Apps Script — jalankan fungsi cleanseData. Lihat dokumen DEPLOY_V2.'],
+      ['Akun tim tindak lanjut?','Sudah tersedia: tl-pug, tl-puc, tl-puj. Kata sandi sama dengan nama pengguna.']
+    ]
+  };
+  return{ // asesor
+    judul:'Peran Anda: Asesor',
+    ring:'Anda melakukan penilaian 5R di lapangan, mencatat temuan beserta buktinya, lalu memverifikasi bahwa perbaikan yang dikerjakan tim tindak lanjut telah sesuai.',
+    langkah:[
+      'Pada Beranda, tentukan periode, tahun, jenis penilaian, Production Unit, dan lokasi, kemudian tekan <b>Mulai</b>. Jawab setiap klausul dengan Ya atau Tidak.',
+      'Setiap aspek bernilai rendah otomatis menjadi temuan. Untuk aspek yang memiliki jawaban <b>Tidak</b>, isi keterangan temuan dan lampirkan foto (wajib).',
+      'Temuan keselamatan (K3) dapat dicatat kapan saja melalui tombol <b>⚠ Temuan Safety</b> pada kotak area. Foto wajib dilampirkan.',
+      'Setelah seluruh area selesai, buka halaman Hasil dan tekan <b>Kirim ke Google</b>. Sesi terkunci setelah terkirim.',
+      'Buka menu <b>Temuan Saya</b> untuk memantau status. Temuan berstatus <b>Menunggu Verifikasi</b> berarti tim tindak lanjut telah mengunggah bukti perbaikan.',
+      'Periksa foto sebelum dan sesudah. Pilih <b>Sesuai · Tutup</b> bila perbaikan memadai, atau <b>Belum sesuai</b> disertai alasan bila belum. Keputusan tersimpan sebagai draf — tekan <b>Kirim ke Google</b> untuk mengunggah.'
+    ],
+    faq:[
+      ['Foto wajib untuk apa saja?','Untuk setiap aspek yang memiliki jawaban "Tidak", dan untuk setiap temuan keselamatan (K3).'],
+      ['Mengapa temuan saya masih terbuka?','Perbaikan belum selesai dikerjakan tim tindak lanjut, atau Anda mengembalikannya karena bukti belum sesuai.'],
+      ['Apa itu "draf"?','Perubahan disimpan lebih dulu pada perangkat Anda. Data baru masuk ke sistem setelah Anda menekan "Kirim ke Google".']
+    ]
+  };
+}
+function renderPanduan(){
+  const auth=getAuth();
+  const role=auth.role;
+  const P=_panduanRole(role);
+  app().innerHTML=topbar('Panduan Penggunaan',_roleLabel(role))+`
+  <div class="wrap">
+    <div class="card">
+      <h2 style="font-size:17px">Alur Penanganan Temuan</h2>
+      <p class="hint">Kotak berwarna gelap menandai tahap yang menjadi tanggung jawab Anda.</p>
+      ${panduanFlowSVG(role)}
+    </div>
+    <div class="card">
+      <h2 style="font-size:16px">${P.judul}</h2>
+      <p style="font-size:13px;color:var(--ink);line-height:1.5">${P.ring}</p>
+    </div>
+    <div class="card">
+      <h2 style="font-size:16px">Langkah Kerja</h2>
+      <ol style="margin:0;padding-left:20px;font-size:13px;line-height:1.6">
+        ${P.langkah.map(s=>`<li style="margin-bottom:8px">${s}</li>`).join('')}
+      </ol>
+    </div>
+    <div class="card">
+      <h2 style="font-size:16px">Pertanyaan Umum</h2>
+      ${P.faq.map(f=>`<div style="margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700">${esc(f[0])}</div>
+        <div style="font-size:12.5px;color:var(--muted);line-height:1.5">${esc(f[1])}</div>
+      </div>`).join('')}
+    </div>
+    <div class="card" style="background:var(--concrete)">
+      <h2 style="font-size:15px">Akun & Cara Masuk</h2>
+      <table class="rep" style="font-size:12.5px"><tbody>
+        <tr><td style="font-weight:700">Asesor</td><td>Nama pengguna dan kata sandi masing-masing (didaftarkan administrator).</td></tr>
+        <tr><td style="font-weight:700">Tim Tindak Lanjut</td><td>Pilih tab "Tindak Lanjut" saat masuk. Akun per Production Unit: <b>tl-pug</b>, <b>tl-puc</b>, <b>tl-puj</b> — kata sandi sama dengan nama pengguna.</td></tr>
+        <tr><td style="font-weight:700">Administrator</td><td>Pilih tab "Admin" saat masuk, lalu masukkan kata sandi administrator.</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="closePanduan()">Kembali</button></div>`;
+}
+function closePanduan(){
+  const auth=getAuth();
+  let v=PANDUAN_FROM||'home';
+  if(v==='panduan')v='home';
+  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety'].indexOf(v)===-1)v='tindaklanjut';
+  VIEW=v;render();
 }
 
 /* [P11] label opsi Periode mengikuti tahun yang dipilih di field Tahun (bukan hardcode tahun berjalan) */
