@@ -1128,7 +1128,7 @@ function generateFindings(draft){
       // hitung skor aspek
       let yes=0;krit.forEach((_,i)=>{if(draft.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
       const skor=aspectScore(yes);
-      if(skor>2)return; // hanya aspek skor rendah (1-2) yang jadi temuan
+      if(skor>3)return; // aspek skor ≤3 (di bawah target Silver) otomatis jadi temuan
       // klausul yang BUKAN 'ya' (Tidak / belum dijawab) = yang perlu diperbaiki
       const gagal=krit.filter((_,i)=>draft.answers[`${areaId}|${asp}|${i}`]!=='ya');
       out.push({
@@ -2101,7 +2101,7 @@ function findingsCard(d){
   const pctClose=f.length?Math.round(close/f.length*100):0;
   return `<div class="card">
     <h2>Temuan dan Tindak Lanjut</h2>
-    <p class="hint">${f.length} temuan, terbentuk otomatis dari aspek bernilai rendah (≤2). Dapat diubah, ditambah, atau dihapus.</p>
+    <p class="hint">${f.length} temuan, terbentuk otomatis dari aspek bernilai ≤3 (di bawah target). Dapat diubah, ditambah, atau dihapus.</p>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
         <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div>
@@ -2119,7 +2119,7 @@ function findingsCard(d){
 }
 function regenTemuan(){
   if(isLocked())return lockBlock();
-  if(!confirm('Buat ulang temuan otomatis dari aspek bernilai ≤2? Temuan yang ditambahkan atau diubah secara manual akan tetap dipertahankan.'))return;
+  if(!confirm('Buat ulang temuan otomatis dari aspek bernilai ≤3? Temuan yang ditambahkan atau diubah secara manual akan tetap dipertahankan.'))return;
   const auto=generateFindings(DRAFT);
   const manual=(DRAFT.findings||[]).filter(f=>!f.auto); // simpan yang manual
   DRAFT.findings=auto.concat(manual);
