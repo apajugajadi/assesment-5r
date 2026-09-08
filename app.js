@@ -23,7 +23,7 @@ const FOLLOWUP_ACCOUNTS={
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL_DEFAULT='https://script.google.com/macros/s/AKfycbxOfBRspjM_9hcWqTmL3_U_5GZmA4B_efGBDG-ATOHW4XnmB0z1hXgwzadxIn4XF6MKuA/exec';
+const SYNC_URL_DEFAULT='https://script.google.com/macros/s/AKfycbxD_w2ptferP9XyOW-2A5fTmVDLsR7Kek7uEkuueY3lHAD4hMb9Kc8f3bqJDZGdqMm0ZA/exec';
 /* Override untuk DEV di localhost — set sekali di Console:
      localStorage.setItem('dev_sync_url','https://script.google.com/macros/s/.../exec')
    atau lewat query ?sync=... . Di production (tanpa override) tetap pakai default. */
