@@ -8,6 +8,11 @@ jadi tidak ada data assessment yang perlu ikut pindah. Yang perlu dibawa cuma:
 - **`config_master.json`** (definisi formulir: area, matriks, target, wawancara)
 - **Isi tab `Users`** (akun asesor + hash sandi) — bila sudah ada akun asli
 
+> **Catatan seed**: `seed_data.js` di repo sudah disamakan dengan formulir live
+> (versi 18) pada commit terbaru. Jadi walaupun langkah upload `config_master.json`
+> terlewat, perangkat dengan cache bersih tetap memuat formulir yang benar. Upload
+> `config_master.json` tetap disarankan agar galeri Foto Standar & versi ikut terbawa.
+
 ---
 
 ## Yang berubah setelah migrasi
