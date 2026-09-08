@@ -1241,6 +1241,40 @@ function _json(obj) {
 }
 
 // ============================================================
+//  BOOTSTRAP DATABASE BARU (untuk migrasi ke akun Google lain)
+// ============================================================
+// Di akun Google BARU: buat project Apps Script baru, tempel code.gs ini,
+// KOSONGKAN SHEET_ID dan FOLDER_ID di atas (jadi '' keduanya), Save, lalu
+// Run fungsi ini SEKALI. Ia membuat Spreadsheet + Folder + seluruh tab, dan
+// mencetak ID keduanya di Execution log. Salin ID itu ke konstanta SHEET_ID
+// & FOLDER_ID, Save lagi, baru Deploy sebagai Web App.
+function bootstrapDatabase() {
+  var log = [];
+  var ss;
+  if (SHEET_ID) { ss = SpreadsheetApp.openById(SHEET_ID); log.push('Pakai Spreadsheet yang sudah ada: ' + ss.getName()); }
+  else { ss = SpreadsheetApp.create('Assesment 5R - Data'); log.push('SHEET_ID BARU  = ' + ss.getId()); }
+
+  _tab(ss, SHEET_DATA, HEAD_DATA);
+  _tab(ss, SHEET_DETAIL, HEAD_DETAIL);
+  _tab(ss, SHEET_TEMUAN, HEAD_TEMUAN);
+  _tab(ss, SHEET_SAFETY, HEAD_SAFETY);
+  _tab(ss, SHEET_RIWAYAT, HEAD_RIWAYAT);
+  _tab(ss, SHEET_USERS, HEAD_USERS);
+  log.push('6 tab + header dibuat/diselaraskan.');
+
+  var folder;
+  if (FOLDER_ID) { folder = DriveApp.getFolderById(FOLDER_ID); log.push('Pakai Folder yang sudah ada: ' + folder.getName()); }
+  else { folder = DriveApp.createFolder('Assesment 5R - Foto'); log.push('FOLDER_ID BARU = ' + folder.getId()); }
+
+  // Sheet1 kosong bawaan Google — hapus bila ada
+  var def = ss.getSheetByName('Sheet1') || ss.getSheetByName('Sheet 1');
+  if (def && ss.getSheets().length > 1) { ss.deleteSheet(def); log.push('Sheet1 bawaan dihapus.'); }
+
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+
+// ============================================================
 //  PEMBERSIHAN DATA (jalankan MANUAL dari editor — TIDAK otomatis)
 // ============================================================
 // cleanseData(): HAPUS SELURUH baris data assessment/temuan/detail/safety/riwayat
