@@ -2544,7 +2544,12 @@ function tlFormHTML(x){
       <h3 style="margin:0;font-size:16px">Tindak Lanjut</h3>
       <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${st==='Close'?'var(--green-400)':st==='Menunggu Verifikasi'?'var(--amber)':'var(--red)'}">${esc(st)}</span>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${isSafety?(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''):(x['Area']?' · '+esc(x['Area']):'')} · ${esc(x['Asesor']||'')}</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:4px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${isSafety?(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''):(x['Area']?' · '+esc(x['Area']):'')} · ${esc(x['Asesor']||'')}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap">
+      <span><b>ID:</b> ${esc(id)}</span>
+      ${(x['Tanggal Temuan']||x['Tanggal'])?`<span><b>Tgl:</b> ${esc((x['Tanggal Temuan']||x['Tanggal']||'').slice(0,10))}</span>`:''}
+      ${x['Periode']?`<span><b>Periode:</b> ${esc(x['Periode'])}</span>`:''}
+    </div>
     <div style="font-size:13px;background:#F7FAF8;border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">${esc(x['Deskripsi']||'(tanpa deskripsi)')}${x['Kategori']?` <span style="color:var(--muted)">[${esc(x['Kategori'])}]</span>`:''}</div>
     ${fotoBtn}
     <label class="field" style="display:flex;align-items:center;gap:8px;background:${dihubungi?'#EAF5EC':'#FEF9EC'};border:1px solid ${dihubungi?'var(--green-400)':'#F5DFA0'};border-radius:9px;padding:9px 11px;margin-bottom:10px;cursor:pointer">
