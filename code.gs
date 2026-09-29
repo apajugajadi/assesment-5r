@@ -16,8 +16,8 @@
  ************************************************************/
 
 // ====== KONFIGURASI ======
-var SHEET_ID  = '1NJ4vpwktaWcoq5myVk-24ux5geoAznptGdxiGIeWuUI'; // Spreadsheet tujuan
-var FOLDER_ID = '1XN5q2GDjNyZAFPsXLFkDGq3yYg1LpcgO';            // Folder foto pada Drive
+var SHEET_ID  = '12brRNsQznR7Bgws_LXHpNleG2QIS9HFW6_JIPOVTCPA'; // Spreadsheet tujuan (akun processengineeringptpl)
+var FOLDER_ID = '15nDVpa8FqZFa5tZw1nm0DHdrnb3wEN08';            // Folder foto pada Drive (akun processengineeringptpl)
 var SHARED_SECRET = 'ganti-rahasia-ini-123'; // harus sama dengan SYNC_SECRET pada app.js
 // ==========================
 
@@ -43,9 +43,13 @@ var HEAD_DATA = [
   'Asesor','Tanggal','Nilai Akhir','Predikat','Jumlah Temuan','Folder Foto',
   'Tahun','Jenis','Asesor Username'
 ];
+// 'Periode' (BARU) ditaruh di ujung kanan (bukan disisipkan) supaya _tab() cukup
+// menambahkan kolom ini di sheet lama tanpa menggeser kolom yang sudah ada.
+// Baris lama (sebelum kolom ini ditambahkan) akan kosong di kolom Periode —
+// dianggap tidak masuk hitungan radar Mid/End sampai asesor sync ulang sesinya.
 var HEAD_DETAIL = [
   'ID Sesi','PU','Lokasi','Area','Aspek','No','Klausul','Jawaban','Skor Aspek',
-  'Tahun','Jenis'
+  'Tahun','Jenis','Periode'
 ];
 // Header tab Temuan: ditambahkan 'Penyebab' dan 'Berulang', serta 'Foto Temuan (DataURL)'
 // dan 'Foto Perbaikan (DataURL)' (BARU) agar before/after bisa ditampilkan langsung di Dashboard Cloud.
@@ -97,6 +101,7 @@ function doPost(e) {
     // ---- mode: admin mengirim config induk ----
     if (body.type === 'config') {
       _writeConfig(body.config);
+      _refreshRingkasanDashboard(); // target/bobot bisa berubah -> Ringkasan & Dashboard perlu ikut update
       return _json({ok:true, type:'config', version:(body.config&&body.config.version)||null});
     }
 
@@ -247,7 +252,7 @@ function doPost(e) {
     if (body.detail && body.detail.length) {
       var rows = body.detail.map(function(d){
         return [rec.id, rec.pu||'', rec.loc||'', d.area, d.aspek, d.no, d.klausul, d.jawaban, d.skor,
-                tj.tahun, tj.jenis];
+                tj.tahun, tj.jenis, rec.periode||''];
       });
       sDetail.getRange(sDetail.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
     }
@@ -329,6 +334,8 @@ function doPost(e) {
       }
       if (galeriBerubah) { cfgGaleri.version = (cfgGaleri.version || 1) + 1; _writeConfig(cfgGaleri); configVer = cfgGaleri.version; }
     }
+
+    _refreshRingkasanDashboard(); // sesi baru tersimpan -> Ringkasan & Dashboard perlu ikut update
 
     return _json({ok:true, id:rec.id, photos:photoCount, folder:folderUrl, syncCount:syncCount,
                   safety:(body.safetyFindings||[]).length, duplicateWarning:dupInfo});
@@ -1275,6 +1282,453 @@ function bootstrapDatabase() {
 }
 
 // ============================================================
+//  RINGKASAN NILAI PER PU (Mid/End/Final) — jalankan MANUAL dari editor
+// ============================================================
+// Membuat/menyegarkan tab "Ringkasan" berisi rata-rata Nilai Akhir untuk
+// Mid Year & End Year (dibaca dari tab Assessment), lalu Final = blending
+// sesuai bobot di Kelola Formulir (fallback 35/65 kalau belum pernah diatur).
+// Dua bagian: rekap PER LOKASI dulu, baru rekap PER PU (rata-rata semua
+// lokasi PU itu) di bawahnya. Kolom Target & Capaian(%) diambil sebagai
+// SNAPSHOT (nilai statis, bukan formula) dari config_master.json — target
+// aslinya tetap dikelola & diubah lewat Admin app (Kelola Formulir > Target
+// Nilai), tab ini murni untuk DILIHAT, bukan diedit manual.
+// Aman dijalankan berkali-kali — isi lama ditimpa ulang.
+// Filter Tahun/Jenis di B1/B2 bisa diubah manual, formula Mid/End/Final ikut kesesuaikan
+// (Target & Capaian tidak ikut filter itu — murni snapshot config saat fungsi dijalankan).
+function buatRingkasanNilai() {
+  var ss = _getSheet();
+  var sh = ss.getSheetByName('Ringkasan');
+  if (sh) ss.deleteSheet(sh);
+  sh = ss.insertSheet('Ringkasan');
+
+  var cfg = _readConfig() || {};
+  var w = cfg.weights || { midYear: 35, endYear: 65 };
+  var targets = cfg.targets || {}; // key: "PU::Lokasi" -> angka target
+
+  // ---- daftar kombinasi PU+Lokasi unik, dan daftar PU unik, dari tab Assessment ----
+  var src = ss.getSheetByName(SHEET_DATA);
+  var combos = [], pus = [];
+  if (src && src.getLastRow() > 1) {
+    var iPu = HEAD_DATA.indexOf('PU'), iLoc = HEAD_DATA.indexOf('Lokasi');
+    var vals = src.getRange(2, 1, src.getLastRow() - 1, src.getLastColumn()).getValues();
+    var seenCombo = {}, seenPu = {};
+    vals.forEach(function (r) {
+      var pu = String(r[iPu] || '').trim();
+      var loc = String(r[iLoc] || '').trim();
+      if (pu && loc) {
+        var key = pu + '||' + loc;
+        if (!seenCombo[key]) { seenCombo[key] = true; combos.push({ pu: pu, loc: loc }); }
+      }
+      if (pu && !seenPu[pu]) { seenPu[pu] = true; pus.push(pu); }
+    });
+    combos.sort(function (a, b) { return a.pu === b.pu ? a.loc.localeCompare(b.loc) : a.pu.localeCompare(b.pu); });
+    pus.sort();
+  }
+
+  // ---- header & sel filter ----
+  sh.getRange('A1').setValue('Tahun filter').setFontWeight('bold');
+  sh.getRange('B1').setValue(new Date().getFullYear());
+  sh.getRange('A2').setValue('Jenis filter').setFontWeight('bold');
+  sh.getRange('B2').setValue('Resmi');
+  sh.getRange('A3').setValue('Bobot Mid (%)').setFontWeight('bold');
+  sh.getRange('B3').setValue(w.midYear || 35);
+  sh.getRange('A4').setValue('Bobot End (%)').setFontWeight('bold');
+  sh.getRange('B4').setValue(w.endYear || 65);
+
+  var tab = "'" + SHEET_DATA + "'"; // nama tab di-quote biar aman kalau ada spasi
+
+  // ---- styling filter cells (label muted, biar senada sama Dashboard) ----
+  sh.getRange('A1:A4').setFontColor(DASH_COLOR.muted);
+  sh.getRange('B1:B4').setBackground('#ffffff').setBorder(true, true, true, true, false, false, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+
+  // ============================================================
+  //  BAGIAN 1: REKAP PER LOKASI
+  // ============================================================
+  var locTitleRow = 6;
+  sh.getRange(locTitleRow, 1, 1, 7).merge()
+    .setValue('PER LOKASI')
+    .setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(11).setHorizontalAlignment('left')
+    .setBorder(true, true, false, true, false, false, DASH_COLOR.dark, SpreadsheetApp.BorderStyle.SOLID);
+  sh.setRowHeight(locTitleRow, 24);
+  var locHeaderRow = locTitleRow + 1;
+  sh.getRange(locHeaderRow, 1, 1, 7).setValues([['PU', 'Lokasi', 'Mid', 'End', 'Final', 'Target', 'Capaian (%)']])
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff').setFontWeight('bold')
+    .setHorizontalAlignment('center');
+  // Simpan target per-lokasi yang dipakai, dipetakan lewat baris, untuk dipakai
+  // ulang menghitung Target rata-rata per PU di Bagian 2 (meniru targetPU() di app.js:
+  // rata-rata target lokasi yang > 0 saja).
+  var targetByPu = {}; // { pu: [target1, target2, ...] (hanya yang > 0) }
+  var locCapaiCells = [];
+  combos.forEach(function (c, i) {
+    var row = locHeaderRow + 1 + i;
+    var tVal = Number(targets[c.pu + '::' + c.loc]) || 0;
+    if (tVal > 0) { (targetByPu[c.pu] = targetByPu[c.pu] || []).push(tVal); }
+    sh.getRange(row, 1).setValue(c.pu);
+    sh.getRange(row, 2).setValue(c.loc);
+    sh.getRange(row, 3).setFormula(
+      '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!F:F,B' + row + ',' + tab + '!G:G,"Mid*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
+    );
+    sh.getRange(row, 4).setFormula(
+      '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!F:F,B' + row + ',' + tab + '!G:G,"End*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
+    );
+    sh.getRange(row, 5).setFormula(
+      '=IF(AND(C' + row + '>0,D' + row + '>0),C' + row + '*$B$3/100+D' + row + '*$B$4/100,IF(D' + row + '>0,D' + row + ',C' + row + '))'
+    );
+    sh.getRange(row, 6).setValue(tVal || '');
+    if (tVal > 0) {
+      sh.getRange(row, 7).setFormula('=IFERROR(ROUND(E' + row + '/F' + row + '*100,1),"")');
+      locCapaiCells.push(sh.getRange(row, 7));
+    }
+    sh.getRange(row, 1, 1, 7).setBackground(i % 2 === 1 ? DASH_COLOR.bg : '#ffffff');
+  });
+  var locLastDataRow = locHeaderRow + combos.length;
+  sh.getRange(locHeaderRow, 1, combos.length + 1, 7)
+    .setBorder(true, true, true, true, true, true, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID)
+    .setVerticalAlignment('middle');
+  sh.getRange(locHeaderRow + 1, 3, combos.length, 5).setHorizontalAlignment('center');
+
+  // ============================================================
+  //  BAGIAN 2: REKAP PER PU (rata-rata seluruh lokasi PU tsb)
+  // ============================================================
+  var puTitleRow = locLastDataRow + 3; // jeda 2 baris kosong dari tabel Lokasi
+  sh.getRange(puTitleRow, 1, 1, 6).merge()
+    .setValue('PER PU')
+    .setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(11).setHorizontalAlignment('left')
+    .setBorder(true, true, false, true, false, false, DASH_COLOR.dark, SpreadsheetApp.BorderStyle.SOLID);
+  sh.setRowHeight(puTitleRow, 24);
+  var puHeaderRow = puTitleRow + 1;
+  sh.getRange(puHeaderRow, 1, 1, 6).setValues([['PU', 'Mid', 'End', 'Final', 'Target', 'Capaian (%)']])
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff').setFontWeight('bold')
+    .setHorizontalAlignment('center');
+  var puCapaiCells = [];
+  pus.forEach(function (pu, i) {
+    var row = puHeaderRow + 1 + i;
+    var tArr = targetByPu[pu] || [];
+    var tPu = tArr.length ? (tArr.reduce(function (a, b) { return a + b; }, 0) / tArr.length) : 0;
+    sh.getRange(row, 1).setValue(pu);
+    sh.getRange(row, 2).setFormula(
+      '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!G:G,"Mid*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
+    );
+    sh.getRange(row, 3).setFormula(
+      '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!G:G,"End*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
+    );
+    sh.getRange(row, 4).setFormula(
+      '=IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*$B$3/100+C' + row + '*$B$4/100,IF(C' + row + '>0,C' + row + ',B' + row + '))'
+    );
+    sh.getRange(row, 5).setValue(tPu ? Math.round(tPu * 100) / 100 : '');
+    if (tPu > 0) {
+      sh.getRange(row, 6).setFormula('=IFERROR(ROUND(D' + row + '/E' + row + '*100,1),"")');
+      puCapaiCells.push(sh.getRange(row, 6));
+    }
+    sh.getRange(row, 1, 1, 6).setBackground(i % 2 === 1 ? DASH_COLOR.bg : '#ffffff');
+  });
+  sh.getRange(puHeaderRow, 1, pus.length + 1, 6)
+    .setBorder(true, true, true, true, true, true, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID)
+    .setVerticalAlignment('middle');
+  sh.getRange(puHeaderRow + 1, 2, pus.length, 5).setHorizontalAlignment('center');
+
+  // ---- conditional formatting Capaian% (merah <80, amber 80-99.9, hijau >=100) ----
+  var allCapaiCells = locCapaiCells.concat(puCapaiCells);
+  if (allCapaiCells.length) {
+    var rules = sh.getConditionalFormatRules();
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(80).setBackground('#FBEEEC').setFontColor(DASH_COLOR.red)
+      .setRanges(allCapaiCells).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(80, 99.999).setBackground('#FEF9EC').setFontColor('#9A6B00')
+      .setRanges(allCapaiCells).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThanOrEqualTo(100).setBackground('#EAF5EC').setFontColor(DASH_COLOR.mid)
+      .setRanges(allCapaiCells).build());
+    sh.setConditionalFormatRules(rules);
+  }
+
+  sh.setFrozenRows(locHeaderRow);
+  sh.autoResizeColumns(1, 7);
+  Logger.log('Ringkasan dibuat: ' + combos.length + ' lokasi, ' + pus.length + ' PU (target diambil dari config_master.json)');
+  return 'OK — ' + combos.length + ' lokasi, ' + pus.length + ' PU: ' + pus.join(', ');
+}
+
+// ============================================================
+//  DASHBOARD VISUAL — KPI card, tabel Per PU, radar 5R Mid vs End — MANUAL
+// ============================================================
+// Tab TERPISAH dari "Ringkasan" ('Dashboard'), murni tampilan visual untuk
+// analisis cepat: KPI card (Nasional + per PU) dengan warna traffic-light
+// sesuai capaian target, tabel Per PU rapi, dan radar chart 5R (Ringkas/
+// Rapi/Resik/Rawat/Rajin) membandingkan Mid Year vs End Year per PU.
+// Filter Tahun/Jenis ada di B4/B5 — ubah kapan saja, seluruh formula ikut
+// menyesuaikan (radar TIDAK ikut menyesuaikan otomatis karena datanya statis
+// snapshot saat fungsi dijalankan — jalankan ulang fungsi ini kalau filter
+// tahun/jenis berubah dan mau radar ikut update).
+// Target diambil snapshot dari config_master.json (sama seperti di Ringkasan)
+// — tetap diubah lewat Admin app > Kelola Formulir > Target Nilai, BUKAN di sini.
+// Palet warna disamakan dengan tampilan app (hijau tua Pertamina Lubricants).
+var DASH_COLOR = {
+  dark: '#0B3D2E', mid: '#1E7A5A', lime: '#39B54A',
+  amber: '#E8A317', red: '#C0392B', bg: '#EEF1EE',
+  line: '#D6DED8', muted: '#6B7A72'
+};
+var DASH_ASPEK = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
+
+// Dipanggil otomatis dari doPost (setiap kali config di-sinkronkan admin ATAU sesi
+// assessment baru berhasil disimpan) supaya tab Ringkasan & Dashboard SELALU
+// up-to-date tanpa perlu dijalankan manual dari editor lagi. Dibungkus try/catch
+// SENGAJA — kalau bagian regenerasi tabel/chart ini gagal karena sebab apa pun,
+// respons sync ke app.js (asesor/admin) TETAP berhasil; error-nya cuma tercatat
+// di log, tidak menggagalkan permintaan yang sedang diproses.
+function _refreshRingkasanDashboard() {
+  try { buatRingkasanNilai(); } catch (e) { Logger.log('Auto-refresh Ringkasan gagal: ' + e); }
+  try { buatDashboard(); } catch (e) { Logger.log('Auto-refresh Dashboard gagal: ' + e); }
+}
+
+// Jalankan SEKALI (dari editor, pilih fungsi ini di dropdown) SEBELUM buatDashboard()
+// pertama kali dipakai, KALAU sudah ada data lama di tab Assessment/Detail dari
+// sebelum kolom 'Periode' ditambahkan. Mengisi kolom Periode di tab Detail dengan
+// mencocokkan ID Sesi ke tab Assessment (yang Periode-nya sudah ada dari awal).
+// Aman dijalankan berkali-kali (idempoten) — baris yang Periode-nya sudah terisi dilewati.
+function backfillPeriodeDetail() {
+  var ss = _getSheet();
+  var shA = ss.getSheetByName(SHEET_DATA);
+  var shD = ss.getSheetByName(SHEET_DETAIL);
+  if (!shA || !shD) return 'Tab Assessment/Detail belum ada';
+  _tab(ss, SHEET_DETAIL, HEAD_DETAIL); // pastikan kolom Periode sudah ada
+
+  var lastA = shA.getLastRow();
+  if (lastA < 2) return 'Tab Assessment kosong, tidak ada yang bisa di-backfill';
+  var headA = shA.getRange(1, 1, 1, shA.getLastColumn()).getValues()[0];
+  var iIdA = headA.indexOf('ID Sesi'), iPerA = headA.indexOf('Periode');
+  var valsA = shA.getRange(2, 1, lastA - 1, shA.getLastColumn()).getValues();
+  var periodeBySesi = {};
+  valsA.forEach(function (r) { periodeBySesi[r[iIdA]] = r[iPerA] || ''; });
+
+  var lastD = shD.getLastRow();
+  if (lastD < 2) return 'Tab Detail kosong, tidak ada yang bisa di-backfill';
+  var headD = shD.getRange(1, 1, 1, shD.getLastColumn()).getValues()[0];
+  var iIdD = headD.indexOf('ID Sesi'), iPerD = headD.indexOf('Periode');
+  var rngD = shD.getRange(2, 1, lastD - 1, shD.getLastColumn());
+  var valsD = rngD.getValues();
+  var filled = 0;
+  for (var r = 0; r < valsD.length; r++) {
+    if (valsD[r][iPerD]) continue; // sudah terisi, lewati
+    var per = periodeBySesi[valsD[r][iIdD]];
+    if (per) { valsD[r][iPerD] = per; filled++; }
+  }
+  rngD.setValues(valsD);
+  Logger.log('Backfill Periode di tab Detail: ' + filled + ' baris terisi dari ' + valsD.length + ' baris total.');
+  return 'OK — ' + filled + ' baris Detail terisi Periode-nya.';
+}
+
+function buatDashboard() {
+  var ss = _getSheet();
+  var old = ss.getSheetByName('Dashboard');
+  if (old) ss.deleteSheet(old);
+  var sh = ss.insertSheet('Dashboard', 0); // taruh di paling depan (tab pertama)
+  sh.setTabColor(DASH_COLOR.dark);
+
+  var cfg = _readConfig() || {};
+  var w = cfg.weights || { midYear: 35, endYear: 65 };
+  var wMid = Number(w.midYear) || 35, wEnd = Number(w.endYear) || 65;
+  var targets = cfg.targets || {};
+
+  // ---- daftar PU unik dari tab Assessment ----
+  var src = ss.getSheetByName(SHEET_DATA);
+  var pus = [];
+  if (src && src.getLastRow() > 1) {
+    var iPu = HEAD_DATA.indexOf('PU');
+    var vals = src.getRange(2, iPu + 1, src.getLastRow() - 1, 1).getValues();
+    var seen = {};
+    vals.forEach(function (r) {
+      var pu = String(r[0] || '').trim();
+      if (pu && !seen[pu]) { seen[pu] = true; pus.push(pu); }
+    });
+    pus.sort();
+  }
+
+  var tabA = "'" + SHEET_DATA + "'";
+  var tabD = "'" + SHEET_DETAIL + "'";
+  var nCards = pus.length + 1; // +1 kartu Nasional
+  var totalCols = Math.max(9, nCards * 3);
+
+  // ============================================================
+  //  JUDUL
+  // ============================================================
+  sh.getRange(1, 1, 1, totalCols).merge()
+    .setValue('DASHBOARD NILAI ASSESSMENT 5R')
+    .setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(16)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.setRowHeight(1, 36);
+  sh.getRange(2, 1, 1, totalCols).merge()
+    .setValue('Direktorat Operasi — PT Pertamina Lubricants · diperbarui ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT+7', 'dd MMM yyyy HH:mm'))
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff')
+    .setFontStyle('italic').setFontSize(9).setHorizontalAlignment('center');
+  sh.setRowHeight(2, 22);
+
+  sh.getRange('A4').setValue('Tahun filter').setFontWeight('bold').setFontColor(DASH_COLOR.muted);
+  sh.getRange('B4').setValue(new Date().getFullYear());
+  sh.getRange('A5').setValue('Jenis filter').setFontWeight('bold').setFontColor(DASH_COLOR.muted);
+  sh.getRange('B5').setValue('Resmi');
+
+  // ============================================================
+  //  KPI CARD: NASIONAL + PER PU
+  // ============================================================
+  var rTitle = 7, rValue = 8, rTarget = 9, rCapai = 10;
+  var cw = 3; // lebar tiap kartu, dalam kolom
+  var finalCellAddr = []; // kumpulan alamat cell Final tiap PU (buat hitung Nasional)
+  var capaiCells = []; // kumpulan Range Capaian% (buat conditional formatting)
+
+  pus.forEach(function (pu, i) {
+    var c0 = 1 + (i + 1) * cw; // geser 1 slot ke kanan, slot pertama buat Nasional
+    var rTitleRange = sh.getRange(rTitle, c0, 1, cw).merge();
+    rTitleRange.setValue(pu).setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
+      .setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+
+    var valRange = sh.getRange(rValue, c0, 1, cw).merge();
+    var mF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,"' + pu + '",' + tabA + '!G:G,"Mid*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
+    var eF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,"' + pu + '",' + tabA + '!G:G,"End*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
+    valRange.setFormula('=ROUND(IF(AND(' + mF + '>0,' + eF + '>0),' + mF + '*' + wMid + '/100+' + eF + '*' + wEnd + '/100,IF(' + eF + '>0,' + eF + ',' + mF + ')),2)');
+    valRange.setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center')
+      .setBackground('#ffffff').setBorder(true, true, false, true, false, false, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+    finalCellAddr.push(valRange.getCell(1, 1).getA1Notation());
+
+    var tArr = Object.keys(targets).filter(function (k) { return k.indexOf(pu + '::') === 0; })
+      .map(function (k) { return Number(targets[k]) || 0; }).filter(function (v) { return v > 0; });
+    var tPu = tArr.length ? Math.round((tArr.reduce(function (a, b) { return a + b; }, 0) / tArr.length) * 100) / 100 : 0;
+
+    var tgtRange = sh.getRange(rTarget, c0, 1, cw).merge();
+    tgtRange.setValue(tPu > 0 ? ('Target: ' + tPu) : 'Target belum diatur')
+      .setFontSize(9).setFontColor(DASH_COLOR.muted).setHorizontalAlignment('center')
+      .setBackground('#ffffff').setBorder(false, true, false, true, false, false, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+
+    var capRange = sh.getRange(rCapai, c0, 1, cw).merge();
+    if (tPu > 0) {
+      capRange.setFormula('=ROUND(' + valRange.getCell(1, 1).getA1Notation() + '/' + tPu + '*100,1)&"% capaian"');
+      capaiCells.push(sh.getRange(rCapai, c0)); // sel angka mentahnya sebenarnya teks gabungan — lihat catatan di bawah
+    } else {
+      capRange.setValue('—');
+    }
+    capRange.setFontSize(10).setFontWeight('bold').setHorizontalAlignment('center')
+      .setBackground('#ffffff').setBorder(false, true, true, true, false, false, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+  });
+
+  // ---- kartu NASIONAL (kolom paling kiri, dihitung dari rata-rata semua kartu PU) ----
+  var nc0 = 1;
+  sh.getRange(rTitle, nc0, 1, cw).merge().setValue('NASIONAL')
+    .setBackground(DASH_COLOR.lime).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  var nasValRange = sh.getRange(rValue, nc0, 1, cw).merge();
+  if (finalCellAddr.length) {
+    nasValRange.setFormula('=ROUND(AVERAGE(' + finalCellAddr.join(',') + '),2)');
+  } else {
+    nasValRange.setValue(0);
+  }
+  nasValRange.setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center')
+    .setBackground('#ffffff').setBorder(true, true, false, true, false, false, DASH_COLOR.lime, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  sh.getRange(rTarget, nc0, 1, cw).merge().setValue('Rata-rata seluruh PU')
+    .setFontSize(9).setFontColor(DASH_COLOR.muted).setHorizontalAlignment('center')
+    .setBackground('#ffffff').setBorder(false, true, false, true, false, false, DASH_COLOR.lime, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  sh.getRange(rCapai, nc0, 1, cw).merge().setValue('')
+    .setBackground('#ffffff').setBorder(false, true, true, true, false, false, DASH_COLOR.lime, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+  sh.setRowHeights(rTitle, 4, 24);
+  sh.setRowHeight(rValue, 32);
+
+  // ============================================================
+  //  TABEL PER PU (rapi, header hijau tua + zebra striping)
+  // ============================================================
+  var tblTitleRow = rCapai + 3;
+  sh.getRange(tblTitleRow, 1).setValue('RINGKASAN PER PU').setFontWeight('bold').setFontSize(12).setFontColor(DASH_COLOR.dark);
+  var tblHeaderRow = tblTitleRow + 1;
+  var tblHeader = ['PU', 'Mid', 'End', 'Final', 'Target', 'Capaian (%)'];
+  sh.getRange(tblHeaderRow, 1, 1, tblHeader.length).setValues([tblHeader])
+    .setBackground(DASH_COLOR.dark).setFontColor('#ffffff').setFontWeight('bold');
+  var capaianNumCells = [];
+  pus.forEach(function (pu, i) {
+    var row = tblHeaderRow + 1 + i;
+    var mF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,A' + row + ',' + tabA + '!G:G,"Mid*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
+    var eF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,A' + row + ',' + tabA + '!G:G,"End*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
+    sh.getRange(row, 1).setValue(pu);
+    sh.getRange(row, 2).setFormula('=ROUND(' + mF + ',2)');
+    sh.getRange(row, 3).setFormula('=ROUND(' + eF + ',2)');
+    sh.getRange(row, 4).setFormula('=ROUND(IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*' + wMid + '/100+C' + row + '*' + wEnd + '/100,IF(C' + row + '>0,C' + row + ',B' + row + ')),2)');
+    var tArr = Object.keys(targets).filter(function (k) { return k.indexOf(pu + '::') === 0; })
+      .map(function (k) { return Number(targets[k]) || 0; }).filter(function (v) { return v > 0; });
+    var tPu = tArr.length ? Math.round((tArr.reduce(function (a, b) { return a + b; }, 0) / tArr.length) * 100) / 100 : 0;
+    sh.getRange(row, 5).setValue(tPu || '');
+    if (tPu > 0) {
+      sh.getRange(row, 6).setFormula('=ROUND(D' + row + '/' + tPu + '*100,1)');
+      capaianNumCells.push(sh.getRange(row, 6));
+    }
+    if (i % 2 === 1) sh.getRange(row, 1, 1, tblHeader.length).setBackground(DASH_COLOR.bg);
+  });
+  sh.getRange(tblHeaderRow, 1, pus.length + 1, tblHeader.length)
+    .setBorder(true, true, true, true, true, true, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+
+  // conditional formatting: Capaian% -> merah <80, amber 80-99.9, hijau >=100
+  if (capaianNumCells.length) {
+    var rules = sh.getConditionalFormatRules();
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(80).setBackground('#FBEEEC').setFontColor(DASH_COLOR.red)
+      .setRanges(capaianNumCells).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberBetween(80, 99.999).setBackground('#FEF9EC').setFontColor('#9A6B00')
+      .setRanges(capaianNumCells).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThanOrEqualTo(100).setBackground('#EAF5EC').setFontColor(DASH_COLOR.mid)
+      .setRanges(capaianNumCells).build());
+    sh.setConditionalFormatRules(rules);
+  }
+
+  // ============================================================
+  //  DATA PENDUKUNG RADAR (zona terpisah, jangan dihapus) + CHART
+  // ============================================================
+  var dataZoneRow = tblHeaderRow + pus.length + 4;
+  sh.getRange(dataZoneRow, 1).setValue('DATA PENDUKUNG RADAR — JANGAN DIHAPUS/DIUBAH (dipakai chart di atas)')
+    .setFontStyle('italic').setFontColor(DASH_COLOR.muted).setFontSize(9);
+
+  var chartAnchorRow = tblHeaderRow + pus.length + 3; // radar dimulai sejajar area setelah tabel
+  var chartsPerRow = 2, chartW = 420, chartH = 260;
+  var blockRow = dataZoneRow + 2;
+
+  pus.forEach(function (pu, i) {
+    // ---- tabel data kecil: Aspek | Mid | End ----
+    var hdrRow = blockRow;
+    sh.getRange(hdrRow, 1, 1, 3).setValues([['Aspek (' + pu + ')', 'Mid', 'End']]).setFontWeight('bold').setFontSize(9);
+    DASH_ASPEK.forEach(function (asp, j) {
+      var row = hdrRow + 1 + j;
+      sh.getRange(row, 1).setValue(asp);
+      sh.getRange(row, 2).setFormula(
+        '=IFERROR(AVERAGEIFS(' + tabD + '!I:I,' + tabD + '!B:B,"' + pu + '",' + tabD + '!E:E,"' + asp + '",' + tabD + '!J:J,$B$4,' + tabD + '!K:K,$B$5,' + tabD + '!L:L,"Mid*"),0)'
+      );
+      sh.getRange(row, 3).setFormula(
+        '=IFERROR(AVERAGEIFS(' + tabD + '!I:I,' + tabD + '!B:B,"' + pu + '",' + tabD + '!E:E,"' + asp + '",' + tabD + '!J:J,$B$4,' + tabD + '!K:K,$B$5,' + tabD + '!L:L,"End*"),0)'
+      );
+    });
+    var dataRange = sh.getRange(hdrRow, 1, 6, 3);
+
+    // ---- radar chart ----
+    var chart = sh.newChart()
+      .setChartType(Charts.ChartType.RADAR)
+      .addRange(dataRange)
+      .setOption('title', 'Radar 5R — ' + pu + ' (Mid vs End)')
+      .setOption('titleTextStyle', { color: DASH_COLOR.dark, fontSize: 12, bold: true })
+      .setOption('colors', [DASH_COLOR.amber, DASH_COLOR.mid])
+      .setOption('width', chartW).setOption('height', chartH)
+      .setPosition(chartAnchorRow + Math.floor(i / chartsPerRow) * 15, 1 + (i % chartsPerRow) * 6, 0, 0)
+      .build();
+    sh.insertChart(chart);
+
+    blockRow = hdrRow + 7; // jeda 1 baris antar blok data PU berikutnya
+  });
+
+  sh.autoResizeColumns(1, totalCols);
+  Logger.log('Dashboard dibuat: ' + pus.length + ' PU, ' + pus.length + ' radar chart.');
+  return 'OK — Dashboard dibuat untuk ' + pus.length + ' PU: ' + pus.join(', ');
+}
+
+// ============================================================
 //  PEMBERSIHAN DATA (jalankan MANUAL dari editor — TIDAK otomatis)
 // ============================================================
 // cleanseData(): HAPUS SELURUH baris data assessment/temuan/detail/safety/riwayat
@@ -1402,6 +1856,53 @@ function getTrendSummary() {
                rata2: Math.round(a.sum / a.n * 100) / 100, jumlah: a.n });
   });
   return out;
+}
+
+// Debug: cetak isi cfg.targets & cfg.weights yang benar-benar tersimpan di
+// config_master.json, plus daftar PU+Lokasi yang ada di tab Assessment —
+// biar gampang lihat apakah key target-nya cocok persis sama nama Lokasi.
+function cekTargets() {
+  var cfg = _readConfig();
+  if (!cfg) { Logger.log('config_master.json TIDAK DITEMUKAN / kosong.'); return; }
+  Logger.log('weights = ' + JSON.stringify(cfg.weights || {}));
+  Logger.log('targets = ' + JSON.stringify(cfg.targets || {}));
+
+  var ss = _getSheet();
+  var src = ss.getSheetByName(SHEET_DATA);
+  if (src && src.getLastRow() > 1) {
+    var iPu = HEAD_DATA.indexOf('PU'), iLoc = HEAD_DATA.indexOf('Lokasi');
+    var vals = src.getRange(2, 1, src.getLastRow() - 1, src.getLastColumn()).getValues();
+    var seen = {};
+    vals.forEach(function (r) {
+      var key = String(r[iPu] || '') + '::' + String(r[iLoc] || '');
+      seen[key] = true;
+    });
+    Logger.log('Kombinasi PU::Lokasi di tab Assessment = ' + JSON.stringify(Object.keys(seen)));
+  }
+}
+
+// Perbaikan sekali-pakai: nama lokasi "FL01 - FL04" (pakai spasi di sekitar strip,
+// versi lama di Kelola Formulir) vs "FL01-FL04" (tanpa spasi, versi yang benar-benar
+// tersimpan di data assessment PUG) bikin key target-nya "yatim" — tidak pernah
+// kebaca oleh Ringkasan/Dashboard. Fungsi ini memindahkan nilainya ke key yang benar.
+// Aman dijalankan berkali-kali (idempoten) — kalau key lama sudah tidak ada, tidak ngapa-ngapain.
+function fixTargetKeyFL01FL04() {
+  var cfg = _readConfig() || {};
+  cfg.targets = cfg.targets || {};
+  var keyLama = 'PUG::FL01 - FL04';
+  var keyBenar = 'PUG::FL01-FL04';
+  if (!Object.prototype.hasOwnProperty.call(cfg.targets, keyLama)) {
+    Logger.log('Key lama "' + keyLama + '" tidak ditemukan — mungkin sudah pernah diperbaiki, atau memang belum pernah diisi.');
+    return 'tidak ada perubahan';
+  }
+  var nilai = cfg.targets[keyLama];
+  cfg.targets[keyBenar] = nilai;
+  delete cfg.targets[keyLama];
+  cfg.version = (cfg.version || 1) + 1;
+  _writeConfig(cfg);
+  _refreshRingkasanDashboard();
+  Logger.log('Dipindahkan: "' + keyLama + '" (' + nilai + ') -> "' + keyBenar + '". Ringkasan & Dashboard di-refresh ulang.');
+  return 'OK — nilai ' + nilai + ' dipindah ke key "' + keyBenar + '"';
 }
 
 // ---- fungsi pemeriksaan manual (jalankan dari editor bila diperlukan) ----

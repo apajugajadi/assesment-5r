@@ -23,7 +23,7 @@ const FOLLOWUP_ACCOUNTS={
    Isi SYNC_URL dengan URL Web App hasil deploy Apps Script.
    SYNC_SECRET harus SAMA dengan SHARED_SECRET di Code.gs.
    Kalau SYNC_URL kosong, fitur sync nonaktif (app tetap jalan offline). */
-const SYNC_URL_DEFAULT='https://script.google.com/macros/s/AKfycbxD_w2ptferP9XyOW-2A5fTmVDLsR7Kek7uEkuueY3lHAD4hMb9Kc8f3bqJDZGdqMm0ZA/exec';
+const SYNC_URL_DEFAULT='https://script.google.com/macros/s/AKfycbyllauMds4c5yFYcmG1PwvC-3UrucyhzvnXYCMFKGcX-KToTnerdpz-q8L-SOL-Vv9fjA/exec';
 /* Override untuk DEV di localhost — set sekali di Console:
      localStorage.setItem('dev_sync_url','https://script.google.com/macros/s/.../exec')
    atau lewat query ?sync=... . Di production (tanpa override) tetap pakai default. */
@@ -75,7 +75,10 @@ let STORE=loadStore();
 /* ---------- Auth ---------- */
 function getAuth(){try{return JSON.parse(localStorage.getItem(AUTH_KEY))||null;}catch(e){return null;}}
 function setAuth(a){localStorage.setItem(AUTH_KEY,JSON.stringify(a));}
-function logout(){localStorage.removeItem(AUTH_KEY);DRAFT=null;render();}
+function logout(){
+  if(_unsavedDrafts()&&!confirm(`Ada ${_unsavedDrafts()} perubahan belum dikirim ke Google. Draf tetap tersimpan di perangkat ini, tapi belum diterima server. Tetap keluar?`))return;
+  localStorage.removeItem(AUTH_KEY);DRAFT=null;render();
+}
 
 /* ---------- App state ---------- */
 let VIEW='home';          // home | assess | report | admin
@@ -529,11 +532,13 @@ function drawerGo(view){
   if(_unsavedDrafts()&&!confirm(`Ada ${_unsavedDrafts()} perubahan belum dikirim ke Google. Tetap pindah halaman?`))return;
   VIEW=view;render();
 }
-/* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut + verifikasi Temuan Saya) */
+/* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut + verifikasi Temuan Saya
+   + perubahan Kelola Formulir/Target yang belum "Sinkronkan ke Seluruh Asesor") */
 function _unsavedDrafts(){
   var n=0;
   try{n+=Object.keys(TL_DRAFT||{}).length;}catch(e){}
   try{n+=Object.keys(VF_DRAFT||{}).length;}catch(e){}
+  try{if(STORE.config&&STORE.config._dirty)n+=1;}catch(e){}
   return n;
 }
 window.addEventListener('beforeunload',function(e){
@@ -1449,6 +1454,10 @@ function exportCSV(){
 }
 
 /* ---------- ADMIN CMS ---------- */
+function adminLeave(){
+  if(STORE.config&&STORE.config._dirty&&!confirm('Ada perubahan Kelola Formulir yang BELUM dikirim ke Google (belum "Sinkronkan ke Seluruh Asesor"). Kalau keluar sekarang, perubahan tetap tersimpan di perangkat ini tapi asesor lain belum menerimanya. Tetap keluar?'))return;
+  VIEW='home';render();
+}
 function renderAdmin(){
   app().innerHTML=topbar('Kelola Formulir','Mode Administrator')+`
   <div class="wrap">
@@ -1463,7 +1472,7 @@ function renderAdmin(){
     </div>
     <div id="adm-body"></div>
   </div>
-  <div class="botbar"><button class="btn btn-primary btn-block" onclick="VIEW='home';render()">‹ Kembali ke Beranda</button></div>`;
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="adminLeave()">‹ Kembali ke Beranda</button></div>`;
   const b=$('#adm-body');
   if(ADMIN_TAB==='area')b.innerHTML=admArea();
   else if(ADMIN_TAB==='matrix')b.innerHTML=admMatrix();
@@ -1566,7 +1575,20 @@ function toggleArea(pu,loc,areaId,on){
   STORE.config._dirty=true; // tandai ada perubahan lokal belum di-sync
   saveStore();
 }
-function addLoc(){const nm=prompt('Nama lokasi baru:');if(!nm)return;STORE.config.matrix[window._mxPU][nm.trim()]=[];STORE.config._dirty=true;saveStore();renderAdmin();}
+/* Standar penamaan lokasi — mencegah mismatch antara nama di form vs data yang
+   tersinkron ke server (pernah kejadian: "FL01 - FL04" vs "FL01-FL04" bikin
+   Target Nilai lokasi itu tidak pernah kebaca di rekap karena key-nya beda). */
+function addLoc(){
+  const nm=prompt('Nama lokasi baru:\n\nStandar penamaan (wajib):\n• Tanpa spasi ganda\n• Tanpa spasi di sekitar tanda "-" — tulis "FL01-FL04", BUKAN "FL01 - FL04"\n• Tidak boleh sama dengan lokasi yang sudah ada');
+  if(!nm)return;
+  const trimmed=nm.trim();
+  if(!trimmed){toast('Nama lokasi tidak boleh kosong');return;}
+  if(/\s{2,}/.test(trimmed)){alert('Nama lokasi tidak boleh mengandung spasi ganda.\n\nContoh benar : "FL01-FL04"\nContoh salah  : "FL01  FL04"');return;}
+  if(/\s-|-\s/.test(trimmed)){alert('Nama lokasi tidak boleh ada spasi di sekitar tanda "-".\n\nContoh benar : "FL01-FL04"\nContoh salah  : "FL01 - FL04"');return;}
+  const existing=Object.keys(STORE.config.matrix[window._mxPU]||{});
+  if(existing.some(l=>l.toLowerCase()===trimmed.toLowerCase())){alert('Lokasi "'+trimmed+'" sudah ada (dicek tanpa membedakan huruf besar/kecil). Gunakan nama lain atau edit lokasi yang sudah ada.');return;}
+  STORE.config.matrix[window._mxPU][trimmed]=[];STORE.config._dirty=true;saveStore();renderAdmin();
+}
 function delLoc(loc){if(!confirm('Hapus Lokasi '+loc+'?'))return;delete STORE.config.matrix[window._mxPU][loc];STORE.config._dirty=true;saveStore();renderAdmin();}
 
 /* ===== (P4) FOTO STANDAR / ACUAN per Area + Aspek =====
@@ -2067,21 +2089,25 @@ function admData(){
 function pushConfig(){
   if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   if(!confirm('Sinkronkan formulir ke seluruh asesor? Versi formulir akan dinaikkan dan disebarkan. Pastikan formulir telah benar.'))return;
-  // naikkan versi config & bersihkan tanda dirty (perubahan ini yang jadi sumber kebenaran)
-  STORE.config.version=(STORE.config.version||1)+1;
-  delete STORE.config._dirty;
-  saveStore();
+  // Kirim dulu dengan versi CALON (belum disimpan ke STORE) — _dirty baru dihapus
+  // dan versi baru dikunci SETELAH server benar-benar konfirmasi berhasil. Kalau
+  // gagal/sinyal putus, _dirty TETAP true supaya admin tidak salah kira sudah tersinkron.
+  const versiCalon=(STORE.config.version||1)+1;
+  const payload=Object.assign({},STORE.config,{version:versiCalon});
   toast('Sedang mengirim formulir ke Google…');
   fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-    body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:STORE.config})})
+    body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:payload})})
     .then(r=>r.json()).then(out=>{
       if(out.ok){
-        alert('BERHASIL\n\nFormulir dan target telah disinkronkan ke versi '+(out.version||STORE.config.version)+'.\n\nSeluruh asesor akan menerima pembaruan saat membuka aplikasi dalam keadaan daring.');
+        STORE.config.version=out.version||versiCalon;
+        delete STORE.config._dirty;
+        saveStore();
+        alert('BERHASIL\n\nFormulir dan target telah disinkronkan ke versi '+(out.version||versiCalon)+'.\n\nSeluruh asesor akan menerima pembaruan saat membuka aplikasi dalam keadaan daring.');
         renderAdmin();
       }else{
-        alert('GAGAL menyinkronkan formulir.\n\nPenyebab: '+(out.error||'tidak diketahui')+'\n\nSilakan coba kembali.');
+        alert('GAGAL menyinkronkan formulir.\n\nPenyebab: '+(out.error||'tidak diketahui')+'\n\nPerubahan Anda TETAP tersimpan di perangkat ini (belum hilang) — silakan coba kirim lagi.');
       }
-    }).catch(e=>alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message));
+    }).catch(e=>alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message+'\n\nPerubahan Anda TETAP tersimpan di perangkat ini — silakan coba kirim lagi.'));
 }
 function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Pencadangan diunduh');}
 function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data telah dipulihkan');renderAdmin();}catch(err){toast('Berkas cadangan tidak valid');}};r.readAsText(f);}
