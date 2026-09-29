@@ -59,7 +59,7 @@ var HEAD_TEMUAN = [
   'ID Temuan','ID Sesi','PU','Lokasi','Periode','Asesor','Area','Kategori','Skor',
   'Deskripsi','Saran','Target','Deskripsi Perbaikan','Tgl Perbaikan','Status','Verifikator','Folder Foto',
   'Penyebab','Berulang','Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Dijadikan Standar','Area ID','Asesor Username',
-  'Catatan Verifikasi','Update Terakhir','Dihubungi'
+  'Catatan Verifikasi','Update Terakhir','Dihubungi','Tanggal Temuan'
 ];
 // Batas aman panjang string per sel Sheets (~50rb char); dataURL foto yang sudah dikompres
 // biasanya jauh di bawah ini, tapi kita pasang jaga-jaga agar tidak error saat setValues.
@@ -295,7 +295,7 @@ function doPost(e) {
                 f.area||'', f.kategori||'', f.skor||'', f.deskripsi||'', f.saran||'',
                 target, deskP, tglP, st, verif, folderUrl,
                 penyebab, berulang, fotoT, fotoP, standar, f.areaId||'', rec.asesorUsername||'',
-                catV, updT, dihub];
+                catV, updT, dihub, rec.tanggal||''];
       });
       sTemuan.getRange(sTemuan.getLastRow()+1, 1, trows.length, trows[0].length).setValues(trows);
     }
