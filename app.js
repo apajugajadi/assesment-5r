@@ -76,7 +76,7 @@ let STORE=loadStore();
 function getAuth(){try{return JSON.parse(localStorage.getItem(AUTH_KEY))||null;}catch(e){return null;}}
 function setAuth(a){localStorage.setItem(AUTH_KEY,JSON.stringify(a));}
 function logout(){
-  if(_unsavedDrafts()&&!confirm(`Ada ${_unsavedDrafts()} perubahan belum dikirim ke Google. Draf tetap tersimpan di perangkat ini, tapi belum diterima server. Tetap keluar?`))return;
+  if(_unsavedDrafts()&&!confirm(`${_unsavedDraftsMsg()}\n\nDraf tetap tersimpan di perangkat ini, tapi belum diterima server. Tetap keluar?`))return;
   localStorage.removeItem(AUTH_KEY);DRAFT=null;render();
 }
 
@@ -529,7 +529,7 @@ function closeDrawer(){
 function drawerGo(view){
   closeDrawer();
   if(view==='admin'&&getAuth().role!=='admin')return;
-  if(_unsavedDrafts()&&!confirm(`Ada ${_unsavedDrafts()} perubahan belum dikirim ke Google. Tetap pindah halaman?`))return;
+  if(_unsavedDrafts()&&!confirm(`${_unsavedDraftsMsg()}\n\nTetap pindah halaman?`))return;
   VIEW=view;render();
 }
 /* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut + verifikasi Temuan Saya
@@ -540,6 +540,20 @@ function _unsavedDrafts(){
   try{n+=Object.keys(VF_DRAFT||{}).length;}catch(e){}
   try{if(STORE.config&&STORE.config._dirty)n+=1;}catch(e){}
   return n;
+}
+/* Rincian per-sumber, biar popup peringatan jelas menyebut menu mana yang
+   perubahannya belum dikirim — bukan cuma "ada X perubahan" yang membingungkan. */
+function _unsavedDraftsDetail(){
+  var parts=[];
+  try{var n=Object.keys(TL_DRAFT||{}).length;if(n)parts.push(n+' di Tindak Lanjut Temuan');}catch(e){}
+  try{var n=Object.keys(VF_DRAFT||{}).length;if(n)parts.push(n+' verifikasi di Temuan Saya');}catch(e){}
+  try{if(STORE.config&&STORE.config._dirty)parts.push('perubahan di Kelola Formulir (belum "Sinkronkan ke Seluruh Asesor")');}catch(e){}
+  return parts;
+}
+function _unsavedDraftsMsg(){
+  var d=_unsavedDraftsDetail();
+  if(!d.length)return '';
+  return 'Ada perubahan belum dikirim ke Google:\n• '+d.join('\n• ');
 }
 window.addEventListener('beforeunload',function(e){
   if(_unsavedDrafts()){e.preventDefault();e.returnValue='';}
