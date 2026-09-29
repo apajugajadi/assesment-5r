@@ -2058,6 +2058,7 @@ function pushConfig(){
   // gagal/sinyal putus, _dirty TETAP true supaya admin tidak salah kira sudah tersinkron.
   const versiCalon=(STORE.config.version||1)+1;
   const payload=Object.assign({},STORE.config,{version:versiCalon});
+  delete payload._dirty;
   toast('Sedang mengirim formulir ke Google…');
   fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({secret:SYNC_SECRET,type:'config',config:payload})})
