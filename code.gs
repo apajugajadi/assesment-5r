@@ -295,7 +295,7 @@ function doPost(e) {
                 f.area||'', f.kategori||'', f.skor||'', f.deskripsi||'', f.saran||'',
                 target, deskP, tglP, st, verif, folderUrl,
                 penyebab, berulang, fotoT, fotoP, standar, f.areaId||'', rec.asesorUsername||'',
-                catV, updT, dihub, rec.tanggal||''];
+                catV, updT, dihub, rec.date||''];
       });
       sTemuan.getRange(sTemuan.getLastRow()+1, 1, trows.length, trows[0].length).setValues(trows);
     }
@@ -2046,34 +2046,46 @@ function cleanseDataByPeriode() {
 // ---- dropdown validasi sheet (jalankan sekali dari editor) ----
 function pasangDropdownValidasi() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
-  var tabs = [
-    { name: 'Temuan',        statusCol: 'G', penyebabCol: 'H', kategoriCol: 'D', dihubungiCol: 'P' },
-    { name: 'SafetyFindings',statusCol: 'G', penyebabCol: 'H', kategoriCol: 'D', dihubungiCol: 'O' }
-  ];
   var statusVals   = ['Open','Menunggu Verifikasi','Close'];
   var penyebabVals = ['Faktor Manusia','Faktor Mesin/Peralatan','Faktor Material','Faktor Metode','Faktor Lingkungan','Lainnya'];
-  var kategoriVals = ['5R','Safety'];
   var dihubungiVals= ['Ya',''];
 
-  tabs.forEach(function(t) {
-    var sh = ss.getSheetByName(t.name);
-    if (!sh) return;
-    var last = Math.max(sh.getLastRow(), 2);
+  function colLetter(idx) { // idx = 0-based column index
+    var s = '';
+    idx++;
+    while (idx > 0) { s = String.fromCharCode(64 + (idx % 26 || 26)) + s; idx = Math.floor((idx - 1) / 26); }
+    return s;
+  }
 
-    function applyDV(col, vals) {
-      var range = sh.getRange(col + '2:' + col + last);
-      var rule  = SpreadsheetApp.newDataValidation()
-        .requireValueInList(vals, true)
-        .setAllowInvalid(false)
-        .build();
-      range.setDataValidation(rule);
-    }
+  function applyDV(sh, colIdx, vals, last) {
+    if (colIdx < 0) return;
+    var col = colLetter(colIdx);
+    var range = sh.getRange(col + '2:' + col + last);
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(vals, true)
+      .setAllowInvalid(false)
+      .build();
+    range.setDataValidation(rule);
+  }
 
-    applyDV(t.statusCol,    statusVals);
-    applyDV(t.penyebabCol,  penyebabVals);
-    applyDV(t.dihubungiCol, dihubungiVals);
-    if (t.name === 'Temuan') applyDV(t.kategoriCol, kategoriVals);
-  });
+  // ---- Temuan ----
+  var shT = ss.getSheetByName(SHEET_TEMUAN);
+  if (shT) {
+    var headT = shT.getRange(1, 1, 1, shT.getLastColumn()).getValues()[0];
+    var last = Math.max(shT.getLastRow(), 2);
+    applyDV(shT, headT.indexOf('Status'),    statusVals,    last);
+    applyDV(shT, headT.indexOf('Penyebab'),  penyebabVals,  last);
+    applyDV(shT, headT.indexOf('Dihubungi'), dihubungiVals, last);
+  }
+
+  // ---- SafetyFindings ----
+  var shS = ss.getSheetByName(SHEET_SAFETY);
+  if (shS) {
+    var headS = shS.getRange(1, 1, 1, shS.getLastColumn()).getValues()[0];
+    var lastS = Math.max(shS.getLastRow(), 2);
+    applyDV(shS, headS.indexOf('Status'),    statusVals,    lastS);
+    applyDV(shS, headS.indexOf('Dihubungi'), dihubungiVals, lastS);
+  }
 
   Logger.log('Dropdown validasi terpasang di Temuan dan SafetyFindings.');
 }
@@ -2132,15 +2144,14 @@ function _bacaCloseRows(ss, tabName) {
 
   var iStatus   = head.indexOf('Status');
   var iPeriode  = head.indexOf('Periode');
-  var iPU       = head.indexOf('Nama PU');
-  var iTemuan   = head.indexOf('Temuan');
-  var iKategori = head.indexOf('Kategori 5R');
-  if (iKategori < 0) iKategori = head.indexOf('Kategori');
+  var iPU       = head.indexOf('PU');
+  var iTemuan   = head.indexOf('Deskripsi');
+  var iKategori = head.indexOf('Kategori');
   var iPenyebab = head.indexOf('Penyebab');
-  var iTindakan = head.indexOf('Tindakan');
-  var iBefore   = head.indexOf('Foto Before');
-  var iAfter    = head.indexOf('Foto After');
-  var iTarget   = head.indexOf('Target Selesai');
+  var iTindakan = head.indexOf('Deskripsi Perbaikan');
+  var iBefore   = head.indexOf('Foto Temuan (DataURL)');
+  var iAfter    = head.indexOf('Foto Perbaikan (DataURL)');
+  var iTarget   = head.indexOf('Target');
 
   var byPU = {};
   for (var r = 1; r < vals.length; r++) {
