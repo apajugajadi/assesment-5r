@@ -59,7 +59,7 @@ var HEAD_TEMUAN = [
   'ID Temuan','ID Sesi','PU','Lokasi','Periode','Asesor','Area','Kategori','Skor',
   'Deskripsi','Saran','Target','Deskripsi Perbaikan','Tgl Perbaikan','Status','Verifikator','Folder Foto',
   'Penyebab','Berulang','Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Dijadikan Standar','Area ID','Asesor Username',
-  'Catatan Verifikasi','Update Terakhir'
+  'Catatan Verifikasi','Update Terakhir','Dihubungi'
 ];
 // Batas aman panjang string per sel Sheets (~50rb char); dataURL foto yang sudah dikompres
 // biasanya jauh di bawah ini, tapi kita pasang jaga-jaga agar tidak error saat setValues.
@@ -79,7 +79,7 @@ var HEAD_SAFETY = [
   'Kategori','Lokasi Titik','Deskripsi','Tanggal Temuan',
   'Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator',
   'Foto Temuan (DataURL)','Foto Perbaikan (DataURL)','Folder Foto',
-  'Catatan Verifikasi','Update Terakhir'
+  'Catatan Verifikasi','Update Terakhir','Dihubungi'
 ];
 // Kolom foto dikecualikan dari listing utama (hemat payload) — diambil on-demand.
 var SAFETY_KOLOM_FOTO = ['Foto Temuan (DataURL)','Foto Perbaikan (DataURL)'];
@@ -283,11 +283,12 @@ function doPost(e) {
         var standar = prev.standar || 'Tidak'; // pertahankan penanda "dijadikan standar" agar tidak hilang saat re-sync
         var catV = prev.catatanVerifikasi || '';
         var updT = prev.updateTerakhir || nowStr;
+        var dihub = prev.dihubungi || '';
         return [f.id, rec.id, rec.pu||'', rec.loc||'', rec.periode||'', rec.asesor||'',
                 f.area||'', f.kategori||'', f.skor||'', f.deskripsi||'', f.saran||'',
                 target, deskP, tglP, st, verif, folderUrl,
                 penyebab, berulang, fotoT, fotoP, standar, f.areaId||'', rec.asesorUsername||'',
-                catV, updT];
+                catV, updT, dihub];
       });
       sTemuan.getRange(sTemuan.getLastRow()+1, 1, trows.length, trows[0].length).setValues(trows);
     }
@@ -306,7 +307,7 @@ function doPost(e) {
                  sf.kategori||'', sf.lokasi||'', sf.deskripsi||'', sf.tanggal||'',
                  stS, prev.deskPerbaikan||'', prev.tglPerbaikan||'', prev.verifikator||'',
                  _clampCell(sf.foto||''), _clampCell(prev.fotoPerbaikan||''), folderUrl,
-                 prev.catatanVerifikasi||'', prev.updateTerakhir||nowStr ];
+                 prev.catatanVerifikasi||'', prev.updateTerakhir||nowStr, prev.dihubungi||'' ];
       });
       sSafety.getRange(sSafety.getLastRow()+1, 1, sfrows.length, sfrows[0].length).setValues(sfrows);
     }
@@ -663,6 +664,7 @@ function _oldTemuanMap(sh, sesiId) {
   var iFotoP = head.indexOf('Foto Perbaikan (DataURL)');
   var iCatV = head.indexOf('Catatan Verifikasi');
   var iUpd = head.indexOf('Update Terakhir');
+  var iDih = head.indexOf('Dihubungi');
   var vals = sh.getRange(2, 1, last-1, sh.getLastColumn()).getValues();
   for (var r = 0; r < vals.length; r++) {
     if (vals[r][1] === sesiId) {
@@ -676,7 +678,8 @@ function _oldTemuanMap(sh, sesiId) {
         verifikator: iVerif > -1 ? vals[r][iVerif] : '',
         fotoPerbaikan: iFotoP > -1 ? vals[r][iFotoP] : '',
         catatanVerifikasi: iCatV > -1 ? vals[r][iCatV] : '',
-        updateTerakhir: iUpd > -1 ? vals[r][iUpd] : ''
+        updateTerakhir: iUpd > -1 ? vals[r][iUpd] : '',
+        dihubungi: iDih > -1 ? vals[r][iDih] : ''
       };
     }
   }
@@ -936,7 +939,7 @@ function _oldSafetyMap(sh, sesiId) {
   var iId = head.indexOf('ID Safety'), iSesi = head.indexOf('ID Sesi'),
       iStatus = head.indexOf('Status'), iDP = head.indexOf('Deskripsi Perbaikan'),
       iTgl = head.indexOf('Tgl Perbaikan'), iVerif = head.indexOf('Verifikator'),
-      iFP = head.indexOf('Foto Perbaikan (DataURL)');
+      iFP = head.indexOf('Foto Perbaikan (DataURL)'), iDihS = head.indexOf('Dihubungi');
   var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
   for (var r = 0; r < vals.length; r++) {
     if (vals[r][iSesi] === sesiId) {
@@ -945,7 +948,8 @@ function _oldSafetyMap(sh, sesiId) {
         deskPerbaikan: iDP > -1 ? vals[r][iDP] : '',
         tglPerbaikan: iTgl > -1 ? vals[r][iTgl] : '',
         verifikator: iVerif > -1 ? vals[r][iVerif] : '',
-        fotoPerbaikan: iFP > -1 ? vals[r][iFP] : ''
+        fotoPerbaikan: iFP > -1 ? vals[r][iFP] : '',
+        dihubungi: iDihS > -1 ? vals[r][iDihS] : ''
       };
     }
   }
@@ -1002,7 +1006,7 @@ function _getSafetyPhotos(safetyId) {
 }
 // Admin memperbarui tindak lanjut satu temuan safety. Perubahan Status dicatat ke
 // tab RiwayatStatus (jejak audit) sama seperti Temuan 5R.
-var SAFETY_ALLOWED_FIELDS = ['Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator','Foto Perbaikan (DataURL)','Kategori','Lokasi Titik','Deskripsi','Catatan Verifikasi'];
+var SAFETY_ALLOWED_FIELDS = ['Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator','Foto Perbaikan (DataURL)','Kategori','Lokasi Titik','Deskripsi','Catatan Verifikasi','Dihubungi'];
 function _updateSafetyFields(safetyId, fields, verifikator) {
   try {
     if (!safetyId) return {ok:false, error:'safetyId kosong'};
@@ -2030,6 +2034,211 @@ function cleanseDataByPeriode() {
   _refreshRingkasanDashboard();
   Logger.log(log.join('\n'));
   return log.join('\n');
+}
+
+// ---- dropdown validasi sheet (jalankan sekali dari editor) ----
+function pasangDropdownValidasi() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var tabs = [
+    { name: 'Temuan',        statusCol: 'G', penyebabCol: 'H', kategoriCol: 'D', dihubungiCol: 'P' },
+    { name: 'SafetyFindings',statusCol: 'G', penyebabCol: 'H', kategoriCol: 'D', dihubungiCol: 'O' }
+  ];
+  var statusVals   = ['Open','Menunggu Verifikasi','Close'];
+  var penyebabVals = ['Faktor Manusia','Faktor Mesin/Peralatan','Faktor Material','Faktor Metode','Faktor Lingkungan','Lainnya'];
+  var kategoriVals = ['5R','Safety'];
+  var dihubungiVals= ['Ya',''];
+
+  tabs.forEach(function(t) {
+    var sh = ss.getSheetByName(t.name);
+    if (!sh) return;
+    var last = Math.max(sh.getLastRow(), 2);
+
+    function applyDV(col, vals) {
+      var range = sh.getRange(col + '2:' + col + last);
+      var rule  = SpreadsheetApp.newDataValidation()
+        .requireValueInList(vals, true)
+        .setAllowInvalid(false)
+        .build();
+      range.setDataValidation(rule);
+    }
+
+    applyDV(t.statusCol,    statusVals);
+    applyDV(t.penyebabCol,  penyebabVals);
+    applyDV(t.dihubungiCol, dihubungiVals);
+    if (t.name === 'Temuan') applyDV(t.kategoriCol, kategoriVals);
+  });
+
+  Logger.log('Dropdown validasi terpasang di Temuan dan SafetyFindings.');
+}
+
+// ---- generator PPT temuan close (jalankan dari editor kapan diperlukan) ----
+var PPT_FILTER_PERIODE = '';   // kosong = semua periode; isi mis. 'Mid Year 2025'
+
+function generatePPTTemuan() {
+  var ss     = SpreadsheetApp.openById(SHEET_ID);
+  var folder = DriveApp.getFolderById(FOLDER_ID);
+  var tgl    = _fmtTgl(new Date());
+  var pres   = SlidesApp.create('Laporan Temuan Close — ' + tgl);
+
+  // hapus slide kosong bawaan
+  pres.getSlides().forEach(function(s){ s.remove(); });
+
+  // ---- Cover ----
+  var cover = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  cover.getBackground().setSolidFill('#1A3C5E');
+  var tb = cover.insertTextBox('Laporan Tindak Lanjut Temuan 5R & Safety\n' + tgl,
+    40, 200, 600, 120);
+  tb.getText().getTextStyle().setFontSize(24).setBold(true).setForegroundColor('#FFFFFF');
+
+  // ---- kumpul data ----
+  var data5R     = _bacaCloseRows(ss, 'Temuan');
+  var dataSafety = _bacaCloseRows(ss, 'SafetyFindings');
+
+  // ---- bagian 5R ----
+  _bagianPPT(pres, 'Temuan 5R', data5R);
+
+  // ---- bagian Safety ----
+  _bagianPPT(pres, 'Temuan Safety', dataSafety);
+
+  // simpan ke folder Drive
+  var file = DriveApp.getFileById(pres.getId());
+  folder.addFile(file);
+  DriveApp.getRootFolder().removeFile(file);
+
+  Logger.log('PPT selesai dibuat: ' + pres.getUrl());
+  return pres.getUrl();
+}
+
+function _fmtTgl(d) {
+  var dd = ('0' + d.getDate()).slice(-2);
+  var mm = ('0' + (d.getMonth()+1)).slice(-2);
+  var yy = d.getFullYear();
+  return dd + '-' + mm + '-' + yy;
+}
+
+function _bacaCloseRows(ss, tabName) {
+  var sh   = ss.getSheetByName(tabName);
+  if (!sh) return {};
+  var vals = sh.getDataRange().getValues();
+  if (vals.length < 2) return {};
+  var head = vals[0];
+
+  var iStatus   = head.indexOf('Status');
+  var iPeriode  = head.indexOf('Periode');
+  var iPU       = head.indexOf('Nama PU');
+  var iTemuan   = head.indexOf('Temuan');
+  var iKategori = head.indexOf('Kategori 5R');
+  if (iKategori < 0) iKategori = head.indexOf('Kategori');
+  var iPenyebab = head.indexOf('Penyebab');
+  var iTindakan = head.indexOf('Tindakan');
+  var iBefore   = head.indexOf('Foto Before');
+  var iAfter    = head.indexOf('Foto After');
+  var iTarget   = head.indexOf('Target Selesai');
+
+  var byPU = {};
+  for (var r = 1; r < vals.length; r++) {
+    var row = vals[r];
+    if (row[iStatus] !== 'Close') continue;
+    if (PPT_FILTER_PERIODE && row[iPeriode] !== PPT_FILTER_PERIODE) continue;
+    var pu = row[iPU] || '(PU tidak diketahui)';
+    if (!byPU[pu]) byPU[pu] = [];
+    byPU[pu].push({
+      temuan:   row[iTemuan]   || '',
+      kategori: row[iKategori] || '',
+      penyebab: row[iPenyebab] || '',
+      tindakan: row[iTindakan] || '',
+      before:   row[iBefore]   || '',
+      after:    row[iAfter]    || '',
+      target:   row[iTarget]   || ''
+    });
+  }
+  return byPU;
+}
+
+function _bagianPPT(pres, sectionTitle, byPU) {
+  // section header
+  _slideDivider(pres, sectionTitle, '#1A3C5E');
+
+  var puList = Object.keys(byPU).sort();
+  puList.forEach(function(pu) {
+    // divider per PU
+    _slideDivider(pres, pu, '#2E6DA4');
+
+    byPU[pu].forEach(function(item) {
+      _slideTemuan(pres, item);
+    });
+  });
+}
+
+function _slideDivider(pres, label, bgColor) {
+  var sl = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  sl.getBackground().setSolidFill(bgColor);
+  var tb = sl.insertTextBox(label, 40, 220, 600, 80);
+  var ts = tb.getText().getTextStyle();
+  ts.setFontSize(28).setBold(true).setForegroundColor('#FFFFFF');
+  tb.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+}
+
+function _slideTemuan(pres, item) {
+  var sl = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  sl.getBackground().setSolidFill('#FFFFFF');
+
+  // judul temuan
+  var title = sl.insertTextBox(item.temuan || '(Temuan)', 20, 15, 680, 40);
+  title.getText().getTextStyle().setFontSize(14).setBold(true).setForegroundColor('#1A3C5E');
+
+  // info baris
+  var info = 'Kategori: ' + item.kategori + '   |   Penyebab: ' + item.penyebab +
+             '   |   Target: ' + item.target;
+  var tb2 = sl.insertTextBox(info, 20, 55, 680, 30);
+  tb2.getText().getTextStyle().setFontSize(10).setForegroundColor('#444444');
+
+  // tindakan
+  if (item.tindakan) {
+    var tb3 = sl.insertTextBox('Tindakan: ' + item.tindakan, 20, 85, 680, 36);
+    tb3.getText().getTextStyle().setFontSize(10).setForegroundColor('#222222');
+  }
+
+  // foto before
+  _sisipGambarMuat(sl, item.before, 30,  130, 300, 200, 'Before');
+  // foto after
+  _sisipGambarMuat(sl, item.after,  370, 130, 300, 200, 'After');
+}
+
+function _sisipGambarMuat(slide, urlOrId, x, y, w, h, label) {
+  // label teks dulu
+  var lb = slide.insertTextBox(label, x, y - 18, w, 18);
+  lb.getText().getTextStyle().setFontSize(9).setBold(true).setForegroundColor('#555555');
+
+  if (!urlOrId) {
+    var ph = slide.insertTextBox('(Foto tidak tersedia)', x, y, w, h);
+    ph.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
+    ph.getTextRange().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+    return;
+  }
+
+  try {
+    // coba ambil dari Drive ID atau URL
+    var fileId = urlOrId;
+    var match  = urlOrId.match(/[-\w]{25,}/);
+    if (match) fileId = match[0];
+
+    var blob = DriveApp.getFileById(fileId).getBlob();
+    slide.insertImage(blob, x, y, w, h);
+  } catch(e) {
+    try {
+      var resp = UrlFetchApp.fetch(urlOrId, {muteHttpExceptions: true});
+      if (resp.getResponseCode() === 200) {
+        slide.insertImage(resp.getBlob(), x, y, w, h);
+      } else {
+        var ph2 = slide.insertTextBox('(Foto gagal dimuat)', x, y, w, h);
+        ph2.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
+      }
+    } catch(e2) {
+      var ph3 = slide.insertTextBox('(Foto error)', x, y, w, h);
+      ph3.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
+    }
+  }
 }
 
 // ---- fungsi pemeriksaan manual (jalankan dari editor bila diperlukan) ----

@@ -8,14 +8,9 @@ const AUTH_KEY='asesmen5r_auth';
 // Admin password (Fase 1: disimpan di kode; ganti sesuai kebutuhan)
 const ADMIN_PASS='admin5r';
 
-/* Akun Tim Tindak Lanjut (hardcode). PASSWORD = USERNAME.
-   Tiap akun terkunci ke 1 PU — hanya melihat & menutup temuan PU tersebut.
-   admin5r tetap super-user (semua PU). Tambah PU baru -> tambah entri di sini. */
-const FOLLOWUP_ACCOUNTS={
-  'tl-pug':{pu:'PUG',nama:'Tindak Lanjut PUG'},
-  'tl-puc':{pu:'PUC',nama:'Tindak Lanjut PUC'},
-  'tl-puj':{pu:'PUJ',nama:'Tindak Lanjut PUJ'}
-};
+// (P-simplifikasi) Role "followup" (tim TL per-PU) DIHAPUS — Admin sekarang jadi
+// satu-satunya yang menangani Tindak Lanjut seluruh PU (lihat diskusi: satu pintu).
+// Admin mengonfirmasi ke asesor secara manual (WA/telepon) sebelum menutup temuan.
 // (P-uid) ASESOR_PASS DIHAPUS — asesor sekarang login dengan akun individual
 // (username + password sendiri, diverifikasi ke server). Lihat _loginUser di code.gs.
 
@@ -381,9 +376,7 @@ function render(){
   if(!auth){renderLogin();return;}
   const _ap=app();if(_ap)_ap.style.maxWidth=''; // reset lebar (modul Tindak Lanjut desktop mengubahnya)
   if(VIEW==='panduan'){renderPanduan();return;}
-  // Tim Tindak Lanjut hanya boleh membuka modul TL + dashboard (view-only)
-  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety','panduan'].indexOf(VIEW)===-1){VIEW='tindaklanjut';}
-  if(VIEW==='tindaklanjut'&&(auth.role==='followup'||auth.role==='admin')){renderTindakLanjut();return;}
+  if(VIEW==='tindaklanjut'&&auth.role==='admin'){renderTindakLanjut();return;}
   if(VIEW==='admin'&&auth.role==='admin'){renderAdmin();return;}
   if(VIEW==='assess'&&DRAFT){renderAssess();return;}
   if(VIEW==='report'&&DRAFT){renderReport();return;}
@@ -405,7 +398,6 @@ function renderLogin(){
     <div class="tag">Audit Ringkas · Rapi · Resik · Rawat · Rajin — Direktorat Operasi</div>
     <div class="seg">
       <button class="${loginRole==='asesor'?'on':''}" onclick="loginRole='asesor';renderLogin()">Asesor</button>
-      <button class="${loginRole==='followup'?'on':''}" onclick="loginRole='followup';renderLogin()">Tindak Lanjut</button>
       <button class="${loginRole==='admin'?'on':''}" onclick="loginRole='admin';renderLogin()">Admin</button>
     </div>
     <div id="login-err"></div>
@@ -415,12 +407,6 @@ function renderLogin(){
       <label class="field"><span class="lbl">Kata Sandi</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••" autocomplete="current-password"></label>
       <p class="hint" style="color:rgba(255,255,255,.55);margin-top:-8px">Belum punya akun? Hubungi admin untuk didaftarkan.</p>
-    `:loginRole==='followup'?`
-      <label class="field"><span class="lbl">Username</span>
-        <input class="input" id="li-user" placeholder="mis. tl-pug" autocomplete="username"></label>
-      <label class="field"><span class="lbl">Kata Sandi</span>
-        <input class="input" id="li-pass" type="password" placeholder="••••••" autocomplete="current-password"></label>
-      <p class="hint" style="color:rgba(255,255,255,.55);margin-top:-8px">Akun tim tindak lanjut per Production Unit.</p>
     `:`
       <label class="field"><span class="lbl">Kata Sandi Administrator</span>
         <input class="input" id="li-pass" type="password" placeholder="••••••"></label>
@@ -446,14 +432,6 @@ async function doLogin(){
   if(loginRole==='admin'){
     if(pass!==ADMIN_PASS){err.innerHTML='<div class="login-err">Kata Sandi Administrator salah.</div>';return;}
     setAuth({role:'admin',name:'Admin'});VIEW='home';render();checkRemoteConfig();
-    return;
-  }
-  if(loginRole==='followup'){
-    const u=(($('#li-user')||{}).value||'').trim().toLowerCase();
-    const acc=FOLLOWUP_ACCOUNTS[u];
-    if(!acc||pass!==u){err.innerHTML='<div class="login-err">Username atau kata sandi salah.</div>';return;}
-    setAuth({role:'followup',name:acc.nama,username:u,pu:acc.pu});
-    VIEW='tindaklanjut';render();checkRemoteConfig();
     return;
   }
   // (P-uid) Login asesor: verifikasi username+password ke server (wajib online sekali di awal)
@@ -494,7 +472,7 @@ function topbar(title,sub){
       <button class="icon-btn" onclick="logout()" title="Keluar">⏻</button>
     </div></div>`;
 }
-function _roleLabel(r){return r==='followup'?'tindak lanjut':r==='asesor'?'asesor':r==='admin'?'admin':(r||'');}
+function _roleLabel(r){return r==='asesor'?'asesor':r==='admin'?'admin':(r||'');}
 function openDrawer(){
   const auth=getAuth();if(!auth)return;
   const dft=loadDraft();
@@ -506,13 +484,13 @@ function openDrawer(){
       <div class="rl">${esc(auth.role)}</div>
     </div>
     <div class="drawer-nav">
-      ${auth.role!=='followup'?`<button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>`:''}
-      ${(auth.role==='admin'||auth.role==='followup')?`<button class="drawer-item" onclick="drawerGo('tindaklanjut')"><span class="di-ic">🛠️</span> Tindak Lanjut Temuan</button>`:''}
+      <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
+      ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('tindaklanjut')"><span class="di-ic">🛠️</span> Tindak Lanjut Temuan</button>`:''}
       ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya${_asrPending?` <span style="background:var(--red);color:#fff;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:4px">${_asrPending}</span>`:''}</button>`:''}
       <button class="drawer-item" onclick="drawerGo('dashnilai')"><span class="di-ic">📊</span> Dashboard Nilai</button>
       <button class="drawer-item" onclick="drawerGo('dashsafety')"><span class="di-ic">⚠️</span> Dashboard Safety (K3)</button>
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
-      ${dft&&auth.role!=='followup'?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
+      ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulir & Butir Audit</button>`:''}
       <button class="drawer-item" onclick="closeDrawer();openPanduan()"><span class="di-ic">📘</span> Panduan Penggunaan</button>
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
@@ -532,12 +510,11 @@ function drawerGo(view){
   if(_unsavedDrafts()&&!confirm(`${_unsavedDraftsMsg()}\n\nTetap pindah halaman?`))return;
   VIEW=view;render();
 }
-/* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut + verifikasi Temuan Saya
+/* Jumlah draf lokal yang belum diunggah (modul Tindak Lanjut
    + perubahan Kelola Formulir/Target yang belum "Sinkronkan ke Seluruh Asesor") */
 function _unsavedDrafts(){
   var n=0;
   try{n+=Object.keys(TL_DRAFT||{}).length;}catch(e){}
-  try{n+=Object.keys(VF_DRAFT||{}).length;}catch(e){}
   try{if(STORE.config&&STORE.config._dirty)n+=1;}catch(e){}
   return n;
 }
@@ -546,7 +523,6 @@ function _unsavedDrafts(){
 function _unsavedDraftsDetail(){
   var parts=[];
   try{var n=Object.keys(TL_DRAFT||{}).length;if(n)parts.push(n+' di Tindak Lanjut Temuan');}catch(e){}
-  try{var n=Object.keys(VF_DRAFT||{}).length;if(n)parts.push(n+' verifikasi di Temuan Saya');}catch(e){}
   try{if(STORE.config&&STORE.config._dirty)parts.push('perubahan di Kelola Formulir (belum "Sinkronkan ke Seluruh Asesor")');}catch(e){}
   return parts;
 }
@@ -695,65 +671,40 @@ function openPanduan(){
   VIEW='panduan';render();
 }
 function panduanFlowSVG(role){
-  // role: 'asesor' | 'followup' | 'admin' — kotak yang jadi tugasnya disorot
+  // role: 'asesor' | 'admin' — kotak yang jadi tugasnya disorot
   const hi='#0B3D2E', dim='#9DB0A6', lime='#39B54A';
-  const c1=(role==='asesor')?hi:dim, c2=(role==='followup')?hi:dim, c3=(role==='asesor')?hi:dim;
-  const adm=(role==='admin')?hi:dim;
+  const c1=(role==='asesor')?hi:dim, c2=(role==='admin')?hi:dim;
   function box(y,c,t1,t2){return `
     <rect x="40" y="${y}" width="240" height="46" rx="9" fill="#fff" stroke="${c}" stroke-width="${c===hi?2.5:1.5}"/>
     <text x="160" y="${y+19}" text-anchor="middle" font-size="12" font-weight="700" fill="${c}">${t1}</text>
     <text x="160" y="${y+35}" text-anchor="middle" font-size="10.5" fill="#6B7A72">${t2}</text>`;}
   function arrow(y){return `<line x1="160" y1="${y}" x2="160" y2="${y+18}" stroke="#9DB0A6" stroke-width="1.5" marker-end="url(#ar)"/>`;}
-  return `<svg viewBox="0 0 320 330" style="width:100%;max-width:340px;display:block;margin:6px auto">
+  return `<svg viewBox="0 0 320 210" style="width:100%;max-width:340px;display:block;margin:6px auto">
     <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="5" refY="4" orient="auto"><path d="M0 0 L6 4 L0 8 z" fill="#9DB0A6"/></marker></defs>
     ${box(8,c1,'1 · ASESOR','Menilai 5R & mencatat temuan')}
     ${arrow(54)}
-    ${box(80,c2,'2 · TIM TINDAK LANJUT','Perbaikan + unggah foto bukti')}
+    ${box(80,c2,'2 · ADMIN','Perbaikan + konfirmasi WA ke asesor')}
     ${arrow(126)}
-    ${box(152,c3,'3 · ASESOR (pembuat)','Verifikasi bukti perbaikan')}
-    <line x1="110" y1="198" x2="90" y2="232" stroke="#9DB0A6" stroke-width="1.5" marker-end="url(#ar)"/>
-    <text x="70" y="222" font-size="9.5" fill="#1E7A5A" font-weight="700">Sesuai</text>
-    <line x1="210" y1="198" x2="230" y2="215" stroke="#C0392B" stroke-width="1.5"/>
-    <path d="M230 215 Q 292 155 288 90 L 282 80" fill="none" stroke="#C0392B" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ar)"/>
-    <text x="250" y="210" font-size="9.5" fill="#C0392B" font-weight="700">Belum</text>
-    <rect x="40" y="236" width="150" height="40" rx="9" fill="#EAF5EC" stroke="${lime}" stroke-width="1.5"/>
-    <text x="115" y="253" text-anchor="middle" font-size="12" font-weight="800" fill="#0B3D2E">SELESAI</text>
-    <text x="115" y="268" text-anchor="middle" font-size="10" fill="#1E7A5A">Status: Close</text>
-    <rect x="40" y="290" width="240" height="34" rx="9" fill="#fff" stroke="${adm}" stroke-width="${adm===hi?2.5:1.5}" stroke-dasharray="5 3"/>
-    <text x="160" y="311" text-anchor="middle" font-size="10.5" font-weight="700" fill="${adm}">ADMIN — memantau seluruh proses</text>
+    <rect x="40" y="152" width="240" height="46" rx="9" fill="#EAF5EC" stroke="${lime}" stroke-width="1.5"/>
+    <text x="160" y="171" text-anchor="middle" font-size="12" font-weight="800" fill="#0B3D2E">SELESAI</text>
+    <text x="160" y="187" text-anchor="middle" font-size="10" fill="#1E7A5A">Status: Close (setelah Admin konfirmasi ke asesor)</text>
   </svg>`;
 }
 function _panduanRole(role){
-  if(role==='followup')return{
-    judul:'Peran Anda: Tim Tindak Lanjut',
-    ring:'Anda menindaklanjuti temuan pada Production Unit Anda — melakukan perbaikan, mendokumentasikan bukti, lalu mengajukan verifikasi kepada asesor pembuat temuan. Penutupan temuan bukan wewenang Anda.',
-    langkah:[
-      'Buka menu <b>Tindak Lanjut Temuan</b>. Daftar yang tampil hanya temuan Production Unit Anda. Tersedia dua tab: <b>Temuan 5R</b> dan <b>Safety (K3)</b>.',
-      'Pilih satu temuan. Isi penyebab, target penyelesaian, deskripsi perbaikan, tanggal penyelesaian, dan unggah <b>foto perbaikan (after)</b>.',
-      'Setelah perbaikan tuntas, ubah <b>Status</b> menjadi <b>Menunggu Verifikasi</b>. Asesor pembuat temuan yang akan memutuskan penutupan.',
-      'Setiap perubahan otomatis tersimpan sebagai draf (ditandai <b>● draf</b>) pada perangkat ini. Tekan <b>Kirim ke Google</b> di bagian bawah untuk mengunggah seluruh draf sekaligus.',
-      'Jika temuan kembali berstatus <b>Open</b> disertai kotak merah "Ditolak verifikator", perbaiki sesuai catatan yang diberikan, kemudian ajukan verifikasi ulang.',
-      'Gunakan tombol <b>Tampilan Desktop / Ponsel</b> di bagian atas untuk menyesuaikan dengan perangkat yang Anda pakai.'
-    ],
-    faq:[
-      ['Mengapa tidak ada pilihan "Close"?','Penutupan temuan adalah kewenangan asesor yang membuat temuan. Anda mengajukan, asesor memutuskan.'],
-      ['Draf hilang bila browser ditutup?','Tidak. Draf tersimpan pada perangkat. Namun selama belum ditekan "Kirim ke Google", data belum masuk sistem dan belum terlihat oleh asesor.'],
-      ['Bisa mengerjakan beberapa temuan sekaligus?','Bisa. Kerjakan satu per satu, semuanya tersimpan sebagai draf, lalu kirim sekali di akhir.']
-    ]
-  };
   if(role==='admin')return{
     judul:'Peran Anda: Administrator',
-    ring:'Anda mengelola formulir dan akun asesor, serta memantau progres tindak lanjut. Anda tidak menangani tindak lanjut harian, tetapi dapat mengambil alih bila diperlukan.',
+    ring:'Anda mengelola formulir & akun asesor, DAN menangani seluruh Tindak Lanjut temuan (5R maupun Safety) untuk semua Production Unit — satu pintu, tidak ada akun tim tindak lanjut terpisah.',
     langkah:[
       '<b>Kelola Formulir & Butir Audit</b> — atur area pemeriksaan, formulir per lokasi, foto standar, dan target nilai. Setelah mengubah, tekan "Sinkronkan Formulir ke Seluruh Asesor" agar perubahan diterima seluruh asesor.',
       '<b>Kelola Asesor</b> — daftarkan akun asesor baru, reset kata sandi, serta mengaktifkan atau menonaktifkan akun.',
-      '<b>Memantau</b> — melalui Dashboard Nilai (realisasi terhadap target), Dashboard Safety (K3), dan Dashboard Analisis Temuan. Perhatikan penanda "temuan mandek lebih dari 7 hari".',
-      '<b>Mengambil alih (bila perlu)</b> — melalui menu Tindak Lanjut Temuan, Anda dapat memilih Production Unit mana pun. Sebagai pengecualian, opsi Status "Close" tersedia untuk Anda apabila asesor pembuat temuan berhalangan.'
+      '<b>Tindak Lanjut Temuan</b> — buka temuan (5R atau Safety) dari PU mana pun. Isi Penyebab/Target Penyelesaian (khusus 5R), Deskripsi Perbaikan, Tanggal, dan Foto After. Centang <b>Sudah Dihubungi</b> setelah menghubungi asesor via WhatsApp/telepon.',
+      'Set status <b>Menunggu Verifikasi</b> sebagai penanda "sudah dikerjakan, tinggal tunggu balasan asesor". Begitu asesor konfirmasi sesuai (via WA), ubah manual jadi <b>Close</b>. Kalau belum sesuai, balikin ke <b>Open</b> dan catat alasannya.',
+      '<b>Memantau</b> — Dashboard Nilai, Dashboard Safety (K3), dan Dashboard Analisis Temuan. Perhatikan penanda "temuan mandek lebih dari 7 hari".'
     ],
     faq:[
-      ['Siapa yang menutup temuan?','Idealnya asesor yang membuat temuan tersebut. Administrator hanya bertindak sebagai cadangan.'],
-      ['Bagaimana menghapus data uji sebelum penggunaan resmi?','Melalui editor Apps Script — jalankan fungsi cleanseData. Lihat dokumen DEPLOY_V2.'],
-      ['Akun tim tindak lanjut?','Sudah tersedia: tl-pug, tl-puc, tl-puj. Kata sandi sama dengan nama pengguna.']
+      ['Siapa yang menutup temuan?','Admin — setelah mengonfirmasi langsung ke asesor pembuat temuan (di luar aplikasi, misal WhatsApp).'],
+      ['Asesor bisa menutup sendiri temuannya?','Tidak lagi. Asesor hanya melihat status & foto before/after lewat menu "Temuan Saya" (read-only) — keputusan Close sepenuhnya di tangan Admin.'],
+      ['Bagaimana menghapus data uji sebelum penggunaan resmi?','Melalui editor Apps Script — jalankan fungsi cleanseData atau cleanseDataByPeriode (bisa difilter per Tahun+Periode). Lihat dokumen DEPLOY_V2.']
     ]
   };
   return{ // asesor
@@ -764,12 +715,12 @@ function _panduanRole(role){
       'Setiap aspek bernilai rendah otomatis menjadi temuan. Untuk aspek yang memiliki jawaban <b>Tidak</b>, isi keterangan temuan dan lampirkan foto (wajib).',
       'Temuan keselamatan (K3) dapat dicatat kapan saja melalui tombol <b>⚠ Temuan Safety</b> pada kotak area. Foto wajib dilampirkan.',
       'Setelah seluruh area selesai, buka halaman Hasil dan tekan <b>Kirim ke Google</b>. Sesi terkunci setelah terkirim.',
-      'Buka menu <b>Temuan Saya</b> untuk memantau status. Temuan berstatus <b>Menunggu Verifikasi</b> berarti tim tindak lanjut telah mengunggah bukti perbaikan.',
-      'Periksa foto sebelum dan sesudah. Pilih <b>Sesuai · Tutup</b> bila perbaikan memadai, atau <b>Belum sesuai</b> disertai alasan bila belum. Keputusan tersimpan sebagai draf — tekan <b>Kirim ke Google</b> untuk mengunggah.'
+      'Buka menu <b>Temuan Saya</b> untuk memantau status (khusus lihat, tidak ada aksi). Status <b>Menunggu Verifikasi</b> berarti Admin sudah mengerjakan perbaikan dan akan segera menghubungi Anda.',
+      'Admin akan menghubungi Anda langsung (WhatsApp/telepon) untuk konfirmasi apakah perbaikan sudah sesuai. Cukup beri jawaban ke Admin — Admin yang akan mengubah status jadi <b>Close</b> di sistem.'
     ],
     faq:[
       ['Foto wajib untuk apa saja?','Untuk setiap aspek yang memiliki jawaban "Tidak", dan untuk setiap temuan keselamatan (K3).'],
-      ['Mengapa temuan saya masih terbuka?','Perbaikan belum selesai dikerjakan tim tindak lanjut, atau Anda mengembalikannya karena bukti belum sesuai.'],
+      ['Mengapa temuan saya masih terbuka?','Perbaikan belum dikerjakan Admin, atau Admin belum sempat menghubungi Anda untuk konfirmasi.'],
       ['Apa itu "draf"?','Perubahan disimpan lebih dulu pada perangkat Anda. Data baru masuk ke sistem setelah Anda menekan "Kirim ke Google".']
     ]
   };
@@ -814,10 +765,8 @@ function renderPanduan(){
   <div class="botbar"><button class="btn btn-primary btn-block" onclick="closePanduan()">Kembali</button></div>`;
 }
 function closePanduan(){
-  const auth=getAuth();
   let v=PANDUAN_FROM||'home';
   if(v==='panduan')v='home';
-  if(auth.role==='followup'&&['tindaklanjut','dashboard','dashnilai','dashsafety'].indexOf(v)===-1)v='tindaklanjut';
   VIEW=v;render();
 }
 
@@ -2462,20 +2411,18 @@ function cssid(s){return String(s).replace(/[^\w]/g,'_');}
 function tlV(x,key){const d=TL_DRAFT[tlId(x)];if(d&&Object.prototype.hasOwnProperty.call(d,key))return d[key];return x[key]||'';}
 
 function renderTindakLanjut(){
-  const auth=getAuth();
-  app().innerHTML=topbar('Tindak Lanjut Temuan',auth.role==='followup'?esc(auth.pu):'Semua PU')+`
+  app().innerHTML=topbar('Tindak Lanjut Temuan','Semua PU')+`
   <div class="wrap" id="tl-body"><div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div></div>
   <div class="botbar" style="gap:8px">
-    <button class="btn btn-ghost" style="flex:.6" onclick="tlLeave()">${auth.role==='followup'?'Keluar':'‹ Beranda'}</button>
+    <button class="btn btn-ghost" style="flex:.6" onclick="tlLeave()">‹ Beranda</button>
     <button class="btn btn-primary" id="tl-kirim-btn" onclick="tlKirim()">⬆ Kirim ke Google (${tlDirtyCount()})</button>
   </div>`;
   if(TL.view==='desktop'){const a=app();if(a)a.style.maxWidth='1180px';}
   loadTL();
 }
 function tlLeave(){
-  const auth=getAuth();
   if(tlDirtyCount()&&!confirm(`Ada ${tlDirtyCount()} temuan dengan perubahan yang BELUM dikirim ke Google. Tetap keluar?`))return;
-  if(auth.role==='followup')logout();else{VIEW='home';render();}
+  VIEW='home';render();
 }
 async function loadTL(){
   const b=$('#tl-body');if(!b)return;
@@ -2492,22 +2439,19 @@ async function loadTL(){
 }
 function tlId(x){return TL.tab==='temuan'?x['ID Temuan']:x['ID Safety'];}
 function tlRows(){
-  const auth=getAuth();
-  const myPU=auth.role==='followup'?auth.pu:(TL.pu||'');
   let rows=(TL.tab==='temuan'?_tlFindings:_tlSafety)||[];
-  if(myPU)rows=rows.filter(x=>x['PU']===myPU);
+  if(TL.pu)rows=rows.filter(x=>x['PU']===TL.pu);
   if(TL.status)rows=rows.filter(x=>(tlV(x,'Status')||'Open')===TL.status);
   return rows;
 }
 function _daysSince(iso){if(!iso)return 0;const d=(Date.now()-new Date(iso).getTime())/86400000;return isNaN(d)?0:Math.floor(d);}
 function drawTL(){
   const b=$('#tl-body');if(!b)return;
-  const auth=getAuth();
   const allRows=(TL.tab==='temuan'?_tlFindings:_tlSafety)||[];
   const puList=[...new Set(allRows.map(x=>x['PU']).filter(Boolean))].sort();
   const rows=tlRows();
   // banner notif: temuan mandek
-  const scope=auth.role==='followup'?allRows.filter(x=>x['PU']===auth.pu):(TL.pu?allRows.filter(x=>x['PU']===TL.pu):allRows);
+  const scope=TL.pu?allRows.filter(x=>x['PU']===TL.pu):allRows;
   const openBelum=scope.filter(x=>(x['Status']||'Open')==='Open').length;
   const stuck=scope.filter(x=>x['Status']!=='Close'&&_daysSince(x['Update Terakhir'])>=7).length;
 
@@ -2529,8 +2473,8 @@ function drawTL(){
         <option value="Close" ${TL.status==='Close'?'selected':''}>Selesai</option>
         <option value="" ${TL.status===''?'selected':''}>Seluruh Status</option>
       </select>
-      ${auth.role==='admin'?`<select class="input" style="flex:1;min-width:120px" onchange="TL.pu=this.value;TL.sel=null;drawTL()">
-        <option value="">Seluruh PU</option>${puList.map(p=>`<option ${p===TL.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>`:''}
+      <select class="input" style="flex:1;min-width:120px" onchange="TL.pu=this.value;TL.sel=null;drawTL()">
+        <option value="">Seluruh PU</option>${puList.map(p=>`<option ${p===TL.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
       <button class="btn btn-ghost btn-sm" onclick="tlToggleView()">${TL.view==='desktop'?'📱 Ponsel':'🖥️ Desktop'}</button>
       <button class="btn btn-ghost btn-sm" onclick="tlRefresh()">Perbarui</button>
     </div>
@@ -2586,13 +2530,14 @@ function tlSelect(id){
 }
 function tlFormHTML(x){
   const id=tlId(x), st=tlV(x,'Status')||'Open', isSafety=TL.tab==='safety';
-  const auth=getAuth();
   const catV=tlV(x,'Catatan Verifikasi');
+  const tipe=isSafety?'safety':'temuan';
+  const dihubungi=tlV(x,'Dihubungi')==='Ya';
   const draftFoto=(TL_DRAFT[id]||{})['Foto Perbaikan (DataURL)'];
   const fotoBtn=isSafety
     ? (x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
     : (x['Folder Foto']?`<a href="${esc(x['Folder Foto'])}" target="_blank" class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px">Buka Folder Foto di Drive</a>`:'');
-  const statusOpts=`<option ${st==='Open'?'selected':''}>Open</option><option ${st==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option>${auth.role==='admin'?`<option ${st==='Close'?'selected':''}>Close</option>`:''}`;
+  const statusOpts=`<option ${st==='Open'?'selected':''}>Open</option><option ${st==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option><option ${st==='Close'?'selected':''}>Close</option>`;
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
       <h3 style="margin:0;font-size:16px">Tindak Lanjut</h3>
@@ -2600,8 +2545,11 @@ function tlFormHTML(x){
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${isSafety?(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''):(x['Area']?' · '+esc(x['Area']):'')} · ${esc(x['Asesor']||'')}</div>
     <div style="font-size:13px;background:#F7FAF8;border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">${esc(x['Deskripsi']||'(tanpa deskripsi)')}${x['Kategori']?` <span style="color:var(--muted)">[${esc(x['Kategori'])}]</span>`:''}</div>
-    ${catV&&st!=='Close'?`<div style="font-size:12.5px;background:#FBEEEC;border:1px solid #E6B0AA;border-radius:9px;padding:10px;margin-bottom:10px;color:var(--red)"><b>Ditolak verifikator:</b> ${esc(catV)}</div>`:''}
     ${fotoBtn}
+    <label class="field" style="display:flex;align-items:center;gap:8px;background:${dihubungi?'#EAF5EC':'#FEF9EC'};border:1px solid ${dihubungi?'var(--green-400)':'#F5DFA0'};border-radius:9px;padding:9px 11px;margin-bottom:10px;cursor:pointer">
+      <input type="checkbox" ${dihubungi?'checked':''} onchange="tlDraftSet('${esc(id)}','${tipe}','Dihubungi',this.checked?'Ya':'');drawTLForm('${esc(id)}')" style="width:18px;height:18px">
+      <span style="font-size:12.5px;font-weight:700;color:${dihubungi?'var(--green)':'#9A6B00'}">${dihubungi?'✓ Asesor sudah dihubungi (WA/telepon)':'Tandai bila asesor sudah dihubungi (WA/telepon)'}</span>
+    </label>
     ${!isSafety?`<label class="field"><span class="lbl">Penyebab (Root Cause)</span>
       <select class="input" onchange="tlDraftSet('${esc(id)}','temuan','Penyebab',this.value==='— pilih —'?'':this.value)">${['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya'].map(p=>`<option ${p===tlV(x,'Penyebab')?'selected':''}>${p||'— pilih —'}</option>`).join('')}</select></label>
     <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" value="${esc(tlV(x,'Target'))}" oninput="tlDraftSet('${esc(id)}','temuan','Target',this.value)" placeholder="contoh: 2026"></label>`:''}
@@ -2610,8 +2558,9 @@ function tlFormHTML(x){
     <label class="field"><span class="lbl">Foto Perbaikan (After)</span>
       <div class="photo-row" id="tl-fotop-row">${draftFoto?`<img src="${draftFoto}" class="photo-thumb" onclick="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Foto Perbaikan (DataURL)','');drawTLForm('${esc(id)}')">`:`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="tlAddFotoP(this,'${esc(id)}','${isSafety?'safety':'temuan'}')"></label>`}</div>
       <p class="hint" style="margin-top:4px">Kosongkan bila tidak mengubah foto.</p></label>
-    <label class="field"><span class="lbl">Status</span><select class="input" onchange="tlDraftSet('${esc(id)}','${isSafety?'safety':'temuan'}','Status',this.value)">${statusOpts}</select>
-      <p class="hint" style="margin-top:4px">Setelah perbaikan selesai, set <b>Menunggu Verifikasi</b> — asesor pembuat temuan yang akan menutup.</p></label>
+    <label class="field"><span class="lbl">Status</span><select class="input" onchange="tlDraftSet('${esc(id)}','${tipe}','Status',this.value)">${statusOpts}</select>
+      <p class="hint" style="margin-top:4px"><b>Menunggu Verifikasi</b> = sudah dikerjakan, tunggu konfirmasi asesor via WA/telepon. Ubah ke <b>Close</b> setelah asesor konfirmasi sesuai; balikin ke <b>Open</b> bila belum sesuai (isi alasannya di bawah).</p></label>
+    <label class="field"><span class="lbl">Catatan Verifikasi / Alasan Dikembalikan</span><textarea class="input" style="min-height:50px" oninput="tlDraftSet('${esc(id)}','${tipe}','Catatan Verifikasi',this.value)" placeholder="Opsional — isi bila dikembalikan ke Open">${esc(catV)}</textarea></label>
     <div style="display:flex;gap:8px;margin-top:6px">
       <button class="btn btn-ghost btn-sm" style="flex:1" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
       ${TL.view!=='desktop'?`<button class="btn btn-primary btn-sm" style="flex:1" onclick="closeModal();drawTL()">Selesai</button>`:''}
@@ -2636,6 +2585,7 @@ async function tlKirim(){
   for(const id of ids){
     const d=TL_DRAFT[id];const isSafety=d._type==='safety';
     const fields={};for(const k in d){if(k!=='_type')fields[k]=d[k];}
+    if(fields.Status==='Close'&&!fields.Verifikator)fields.Verifikator=getAuth().name||'Admin';
     try{
       const body=isSafety
         ? {secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||''}
@@ -3108,31 +3058,22 @@ async function unmarkAsStandard(id){
     }else alert('GAGAL membatalkan status.\n\nPenyebab: '+(out.error||'tidak diketahui'));
   }catch(e){alert('GAGAL memproses. Mohon periksa sinyal.\n\nRincian: '+e.message);}
 }
-/* ===== TEMUAN SAYA — asesor MEMVERIFIKASI perbaikan atas temuan yang IA buat =====
-   Asesor tidak lagi mengisi perbaikan (itu tugas tim TL). Di sini asesor:
-   - melihat status semua temuan yang ia buat
-   - untuk yang "Menunggu Verifikasi": cek bukti tim TL lalu Setujui (Close) /
-     Tolak (balik Open + catatan). Keputusan disimpan sbg draf lalu Kirim batch. */
+/* ===== TEMUAN SAYA — READ-ONLY untuk asesor =====
+   Asesor HANYA melihat status & foto before/after temuan yang ia buat sendiri.
+   Tindak lanjut & verifikasi/penutupan (Open -> Menunggu Verifikasi -> Close) murni
+   wewenang Admin (modul Tindak Lanjut), setelah Admin konfirmasi manual ke asesor
+   via WA/telepon. Tidak ada draf/kirim di halaman ini. */
 let _mfFindings=null,_mfSafety=null;
 let MF_FILTER='verif';
-let VF_DRAFT=(function(){try{return JSON.parse(localStorage.getItem('vf_draft'))||{};}catch(e){return {};}})();
-function _vfSave(){try{localStorage.setItem('vf_draft',JSON.stringify(VF_DRAFT));}catch(e){}}
-function vfDirtyCount(){return Object.keys(VF_DRAFT).length;}
-let _asrPending=0; // jumlah temuan menunggu verifikasi asesor (badge)
+let _asrPending=0; // jumlah temuan menunggu verifikasi (badge informatif)
 
 function renderTemuanSaya(){
-  app().innerHTML=topbar('Temuan Saya','Verifikasi tindak lanjut temuan Anda')+`
+  app().innerHTML=topbar('Temuan Saya','Pantau status tindak lanjut temuan Anda')+`
   <div class="wrap" id="mf-body"><div class="empty"><div class="ic">⏳</div>Memuat temuan Anda…</div></div>
-  <div class="botbar" style="gap:8px">
-    <button class="btn btn-ghost" style="flex:.6" onclick="mfLeave()">‹ Beranda</button>
-    <button class="btn btn-primary" id="mf-kirim-btn" onclick="vfKirim()">⬆ Kirim ke Google (${vfDirtyCount()})</button>
-  </div>`;
+  <div class="botbar"><button class="btn btn-primary btn-block" onclick="mfLeave()">‹ Beranda</button></div>`;
   loadMyFindings();
 }
-function mfLeave(){
-  if(vfDirtyCount()&&!confirm(`Ada ${vfDirtyCount()} keputusan verifikasi BELUM dikirim ke Google. Tetap keluar?`))return;
-  VIEW='home';render();
-}
+function mfLeave(){VIEW='home';render();}
 async function loadMyFindings(){
   const b=$('#mf-body');if(!b)return;
   const auth=getAuth();
@@ -3154,65 +3095,41 @@ function mfType(x){return x['ID Safety']?'safety':'temuan';}
 function renderMyFindingsList(){
   const b=$('#mf-body');if(!b)return;
   const all=[..._mfFindings||[],...(_mfSafety||[])];
-  const eff=x=>{const d=VF_DRAFT[mfId(x)];return d&&d.Status?d.Status:(x['Status']||'Open');};
   let rows;
   if(MF_FILTER==='verif')rows=all.filter(x=>(x['Status']||'')==='Menunggu Verifikasi');
-  else if(MF_FILTER==='open')rows=all.filter(x=>eff(x)==='Open');
-  else if(MF_FILTER==='close')rows=all.filter(x=>eff(x)==='Close');
+  else if(MF_FILTER==='open')rows=all.filter(x=>(x['Status']||'Open')==='Open');
+  else if(MF_FILTER==='close')rows=all.filter(x=>(x['Status']||'')==='Close');
   else rows=all;
   const pend=all.filter(x=>(x['Status']||'')==='Menunggu Verifikasi').length;
+  const tab=(k,label)=>`<button class="${MF_FILTER===k?'on':''}" style="color:${MF_FILTER===k?'#fff':'var(--muted)'};background:${MF_FILTER===k?'var(--green)':'transparent'}" onclick="MF_FILTER='${k}';renderMyFindingsList()">${label}</button>`;
   b.innerHTML=`<div class="card">
     <h2>Temuan yang Anda Buat</h2>
-    <p class="hint">Tim Tindak Lanjut mengerjakan perbaikan. Anda yang <b>memverifikasi</b> apakah sudah sesuai.${vfDirtyCount()?` <span style="color:var(--amber);font-weight:700">${vfDirtyCount()} keputusan belum dikirim.</span>`:''}</p>
+    <p class="hint">Tindak lanjut & verifikasi dikerjakan oleh <b>Admin</b> — Admin akan menghubungi Anda langsung untuk konfirmasi sebelum menutup temuan. Halaman ini hanya untuk memantau progres.</p>
     <div class="seg" style="background:var(--concrete);margin:0">
-      <button class="${MF_FILTER==='verif'?'on':''}" style="color:${MF_FILTER==='verif'?'#fff':'var(--muted)'};background:${MF_FILTER==='verif'?'var(--green)':'transparent'}" onclick="MF_FILTER='verif';renderMyFindingsList()">Perlu Verifikasi${pend?` (${pend})`:''}</button>
-      <button class="${MF_FILTER==='open'?'on':''}" style="color:${MF_FILTER==='open'?'#fff':'var(--muted)'};background:${MF_FILTER==='open'?'var(--green)':'transparent'}" onclick="MF_FILTER='open';renderMyFindingsList()">Terbuka</button>
-      <button class="${MF_FILTER==='close'?'on':''}" style="color:${MF_FILTER==='close'?'#fff':'var(--muted)'};background:${MF_FILTER==='close'?'var(--green)':'transparent'}" onclick="MF_FILTER='close';renderMyFindingsList()">Selesai</button>
+      ${tab('verif','Menunggu Verifikasi'+(pend?` (${pend})`:''))}${tab('open','Terbuka')}${tab('close','Selesai')}
     </div>
   </div>
   ${rows.length?rows.map(x=>mfRow(x)).join(''):'<div class="empty"><div class="ic">✓</div>Tidak ada temuan pada kategori ini.</div>'}`;
 }
 function mfRow(x){
   const id=mfId(x), isSafety=mfType(x)==='safety';
-  const srvSt=x['Status']||'Open';
-  const draft=VF_DRAFT[id];
-  const eff=draft&&draft.Status?draft.Status:srvSt;
-  const stc=eff==='Close'?'var(--green-400)':eff==='Menunggu Verifikasi'?'var(--amber)':'var(--red)';
-  const perluVerif=srvSt==='Menunggu Verifikasi';
+  const st=x['Status']||'Open';
+  const stc=st==='Close'?'var(--green-400)':st==='Menunggu Verifikasi'?'var(--amber)':'var(--red)';
   return `<div class="card" style="padding:14px">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap">
       <span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:5px;color:#fff;background:${isSafety?'var(--red)':'var(--green-400)'}">${esc((x['Kategori']||'').toUpperCase())}</span>
       ${isSafety?'<span style="font-size:9px;font-weight:800;color:var(--muted)">SAFETY</span>':''}
-      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(eff)}${draft?' *':''}</span>
+      <span style="margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff;background:${stc}">${esc(st)}</span>
     </div>
     <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Area']?' · '+esc(x['Area']):(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):'')}</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
-    ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;background:#F7FAF8;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px"><b>Tindak lanjut tim TL:</b> ${esc(x['Deskripsi Perbaikan'])}${x['Tgl Perbaikan']?`<br><span style="color:var(--muted)">Tgl: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</span>`:''}</div>`:''}
+    ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;background:#F7FAF8;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px"><b>Tindak lanjut Admin:</b> ${esc(x['Deskripsi Perbaikan'])}${x['Tgl Perbaikan']?`<br><span style="color:var(--muted)">Tgl: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</span>`:''}</div>`:''}
     ${(x['_adaFotoTemuan']||x['_adaFotoPerbaikan'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewBeforeAfter('${esc(id)}',${isSafety})">Lihat Foto Before / After</button>`:''}
-    ${perluVerif?`
-      ${draft?`<div style="font-size:12px;text-align:center;color:${draft.Status==='Close'?'var(--green-400)':'var(--red)'};font-weight:700;margin-bottom:6px">${draft.Status==='Close'?'✔ Akan disetujui (Close)':'✘ Akan ditolak'}${draft['Catatan Verifikasi']?' — '+esc(draft['Catatan Verifikasi']):''} · <a onclick="delete VF_DRAFT['${esc(id)}'];_vfSave();renderMyFindingsList();updateKirimBtn()" style="color:var(--green);cursor:pointer">batalkan</a></div>`:`
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-danger btn-sm" style="flex:1" onclick="mfTolak('${esc(id)}','${mfType(x)}')">✘ Belum sesuai</button>
-        <button class="btn btn-primary btn-sm" style="flex:1" onclick="mfSetuju('${esc(id)}','${mfType(x)}')">✔ Sesuai · Tutup</button>
-      </div>`}
-    `:`
-      ${srvSt==='Open'?`<div style="font-size:11px;color:var(--muted)">${x['Catatan Verifikasi']?'Dikembalikan — menunggu revisi tim TL.':'Sedang ditindaklanjuti tim TL.'}</div>`:''}
-      ${srvSt==='Close'?`<div style="font-size:11px;color:var(--green-400)">Selesai & terverifikasi${x['Verifikator']?' oleh '+esc(x['Verifikator']):''}.</div>`:''}
-    `}
+    ${st==='Menunggu Verifikasi'?`<div style="font-size:11px;color:var(--amber);font-weight:700">Admin menunggu konfirmasi Anda — Anda akan dihubungi langsung.</div>`:''}
+    ${st==='Open'?`<div style="font-size:11px;color:var(--muted)">${x['Catatan Verifikasi']?'Dikembalikan — menunggu revisi.':'Belum ditindaklanjuti.'}</div>`:''}
+    ${st==='Close'?`<div style="font-size:11px;color:var(--green-400)">Selesai & terverifikasi${x['Verifikator']?' oleh '+esc(x['Verifikator']):''}.</div>`:''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
   </div>`;
-}
-function updateKirimBtn(){const c=$('#mf-kirim-btn');if(c)c.textContent=`⬆ Kirim ke Google (${vfDirtyCount()})`;}
-function mfSetuju(id,type){
-  VF_DRAFT[id]={_type:type,Status:'Close',Verifikator:getAuth().name||''};
-  _vfSave();renderMyFindingsList();updateKirimBtn();
-}
-function mfTolak(id,type){
-  const c=prompt('Alasan belum sesuai (wajib) — akan dikirim ke tim Tindak Lanjut:');
-  if(c==null)return;
-  if(!c.trim()){toast('Catatan wajib diisi');return;}
-  VF_DRAFT[id]={_type:type,Status:'Open','Catatan Verifikasi':c.trim(),Verifikator:getAuth().name||''};
-  _vfSave();renderMyFindingsList();updateKirimBtn();
 }
 async function viewBeforeAfter(id,isSafety){
   toast('Mengambil foto…');
@@ -3229,30 +3146,6 @@ async function viewBeforeAfter(id,isSafety){
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
   }catch(e){toast('Gagal mengambil foto');}
-}
-async function vfKirim(){
-  const ids=Object.keys(VF_DRAFT);
-  if(!ids.length){toast('Tidak ada keputusan untuk dikirim');return;}
-  if(!confirm(`Kirim ${ids.length} keputusan verifikasi ke Google?`))return;
-  const auth=getAuth();
-  const btn=$('#mf-kirim-btn');if(btn)btn.disabled=true;
-  let ok=0,gagal=0;
-  for(const id of ids){
-    const d=VF_DRAFT[id];const isSafety=d._type==='safety';
-    const fields={Status:d.Status,Verifikator:d.Verifikator||auth.name||''};
-    if(d['Catatan Verifikasi'])fields['Catatan Verifikasi']=d['Catatan Verifikasi'];
-    else fields['Catatan Verifikasi']=''; // approve -> bersihkan catatan penolakan lama
-    try{
-      const body={secret:SYNC_SECRET,type:isSafety?'verifySafetyFinding':'verifyFinding',username:auth.username,fields};
-      if(isSafety)body.safetyId=id;else body.findingId=id;
-      const out=await(await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)})).json();
-      if(out.ok){delete VF_DRAFT[id];_vfSave();ok++;}else{gagal++;}
-    }catch(e){gagal++;}
-    if(btn)btn.textContent=`⬆ Mengirim… (${ok}/${ids.length})`;
-  }
-  if(btn){btn.disabled=false;btn.textContent=`⬆ Kirim ke Google (${vfDirtyCount()})`;}
-  alert(`Selesai.\n\nBerhasil: ${ok}\nGagal: ${gagal}`);
-  loadMyFindings();
 }
 async function refreshAsrPending(){
   const auth=getAuth();
