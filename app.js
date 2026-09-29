@@ -64,7 +64,7 @@ function loadStore(){
   };
   return s;
 }
-function saveStore(){try{localStorage.setItem(LS_KEY,JSON.stringify(STORE));}catch(e){toast('Gagal menyimpan: kemungkinan penyimpanan penuh');}}
+function saveStore(){try{localStorage.setItem(LS_KEY,JSON.stringify(STORE));}catch(e){toastError('Gagal menyimpan: kemungkinan penyimpanan penuh');}}
 let STORE=loadStore();
 
 /* ---------- Auth ---------- */
@@ -84,7 +84,8 @@ let ADMIN_TAB='area';     // area | items | matrix | sessions
 const $=s=>document.querySelector(s);
 const app=()=>$('#app');
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),3500);}
+function toastError(msg){const t=document.createElement('div');t.className='toast toast-error';const txt=document.createElement('span');txt.textContent=msg;const x=document.createElement('button');x.textContent='×';x.style.cssText='background:none;border:none;color:inherit;font-size:18px;line-height:1;cursor:pointer;margin-left:10px;padding:0;opacity:.8';x.onclick=()=>t.remove();t.appendChild(txt);t.appendChild(x);document.body.appendChild(t);}
 function gradeFor(score){
   if(score==null||isNaN(score))return{label:'—',color:'#6B7A72'};
   for(const g of STORE.config.grading){if(score>=g.min&&score<=g.max+0.0001)return g;}
@@ -263,7 +264,7 @@ function confirmCropper(){
   }, 'image/jpeg', 0.9);
 }
 function handlePhoto(file,cb){
-  if(!storageOK()){toast('Penyimpanan hampir penuh — mohon lakukan pencadangan dan hapus data lama terlebih dahulu');return;}
+  if(!storageOK()){toastError('Penyimpanan hampir penuh — mohon lakukan pencadangan dan hapus data lama terlebih dahulu');return;}
   const reader=new FileReader();
   reader.onload=e=>{
     const img=new Image();
@@ -794,7 +795,7 @@ function clearMyData(){
 function startAssess(){
   const auth=getAuth();
   if(auth.role==='asesor'&&SYNC_STATUS.state==='failed'){
-    toast('⛔ Penilaian baru dikunci — formulir belum berhasil disinkronkan. Coba sinkron ulang dari Beranda.');
+    toastError('⛔ Penilaian baru dikunci — formulir belum berhasil disinkronkan. Coba sinkron ulang dari Beranda.');
     return;
   }
   const pu=$('#h-pu').value, loc=$('#h-loc').value, periode=$('#h-periode').value;
@@ -817,7 +818,7 @@ function openSession(id){
   const s=STORE.sessions.find(x=>x.id===id);if(!s)return;
   DRAFT=JSON.parse(JSON.stringify(s));VIEW='report';render();
 }
-function resumeDraft(){const d=loadDraft();if(!d){toast('Konsep penilaian tidak ditemukan');renderHome();return;}DRAFT=d;VIEW='assess';render();}
+function resumeDraft(){const d=loadDraft();if(!d){toastError('Konsep penilaian tidak ditemukan');renderHome();return;}DRAFT=d;VIEW='assess';render();}
 function discardDraft(){if(!confirm('Batalkan isian yang belum selesai? Tidak bisa dikembalikan.'))return;clearDraft();renderHome();toast('Konsep penilaian telah dibatalkan');}
 
 /* ---------- ASSESS ---------- */
@@ -961,9 +962,9 @@ function renderAssessBody(){
   body.innerHTML=html;
 }
 function isLocked(){return !!(DRAFT&&DRAFT.locked);}
-function lockBlock(){toast('Sesi telah terkunci karena sudah dikirim ke Google. Perubahan tidak dapat dilakukan.');}
+function lockBlock(){toastError('Sesi telah terkunci karena sudah dikirim ke Google. Perubahan tidak dapat dilakukan.');}
 function unlockSession(){
-  const auth=getAuth();if(!auth||auth.role!=='admin'){toast('Hanya administrator yang dapat membuka kunci sesi');return;}
+  const auth=getAuth();if(!auth||auth.role!=='admin'){toastError('Hanya administrator yang dapat membuka kunci sesi');return;}
   if(!confirm('Buka kunci sesi ini untuk melakukan koreksi? Setelah diperbarui, sesi WAJIB disinkronkan ulang ke Google agar data tetap konsisten.'))return;
   DRAFT.locked=false;
   const i=STORE.sessions.findIndex(s=>s.id===DRAFT.id);
@@ -1015,7 +1016,7 @@ function navArea(dir){
   if(dir>0){
     const bad=validateCurrentStep();
     if(bad){
-      toast('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum lanjut');
+      toastError('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum lanjut');
       spotlightElement(bad);
       return;
     }
@@ -1070,7 +1071,7 @@ function saveDraftLite(){
     flashSaved();
   }catch(e){
     // storage penuh
-    toast('Penyimpanan penuh — mohon kurangi jumlah foto atau lakukan pencadangan terlebih dahulu');
+    toastError('Penyimpanan penuh — mohon kurangi jumlah foto atau lakukan pencadangan terlebih dahulu');
   }
 }
 function flashSaved(){
@@ -1116,7 +1117,7 @@ function generateFindings(draft){
 function finishAssess(){
   const bad=validateCurrentStep();
   if(bad){
-    toast('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum melihat hasil');
+    toastError('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum melihat hasil');
     spotlightElement(bad);
     return;
   }
@@ -1491,7 +1492,7 @@ function critRow(asp,i,val){return `<div style="display:flex;gap:6px;margin-bott
   <button class="btn btn-danger btn-sm" onclick="this.parentNode.remove()">✕</button></div>`;}
 function addCrit(asp){const wrap=$('#ea-'+asp);const div=document.createElement('div');div.innerHTML=critRow(asp,wrap.children.length,'');wrap.appendChild(div.firstChild);}
 function saveArea(id,isNew){
-  const name=$('#ea-name').value.trim();if(!name){toast('Nama area wajib diisi');return;}
+  const name=$('#ea-name').value.trim();if(!name){toastError('Nama area wajib diisi');return;}
   const aspects={};
   ASPECTS.forEach(asp=>{aspects[asp]=Array.from(document.querySelectorAll(`#ea-${asp} textarea`)).map(t=>t.value.trim()).filter(Boolean);});
   if(isNew){STORE.config.areaChecks.push({id:id,name,aspects});}
@@ -1689,7 +1690,7 @@ async function markGaleriNotifDibaca(){
       body:JSON.stringify({secret:SYNC_SECRET,type:'markGaleriNotifDibaca'})});
     const out=await res.json();
     if(out.ok){(STORE.config.fotoStandarNotif||[]).forEach(n=>n.dibaca=true);saveStore();renderAdmin();}
-  }catch(e){toast('Gagal menandai notifikasi. Coba lagi nanti.');}
+  }catch(e){toastError('Gagal menandai notifikasi. Coba lagi nanti.');}
 }
 
 /* ===== TARGET per LOKASI/ZONA (key: PU::lokasi) ===== */
@@ -2073,7 +2074,7 @@ function pushConfig(){
     }).catch(e=>alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message+'\n\nPerubahan Anda TETAP tersimpan di perangkat ini — silakan coba kirim lagi.'));
 }
 function backupData(){const blob=new Blob([JSON.stringify(STORE)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_asesmen5r_'+new Date().toISOString().slice(0,10)+'.json';a.click();toast('Pencadangan diunduh');}
-function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data telah dipulihkan');renderAdmin();}catch(err){toast('Berkas cadangan tidak valid');}};r.readAsText(f);}
+function restoreData(inp){const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{STORE=JSON.parse(e.target.result);saveStore();toast('Data telah dipulihkan');renderAdmin();}catch(err){toastError('Berkas cadangan tidak valid');}};r.readAsText(f);}
 function resetData(){if(!confirm('Kembalikan seluruh data ke kondisi awal? Penilaian yang tersimpan akan hilang.'))return;localStorage.removeItem(LS_KEY);STORE=loadStore();saveStore();renderAdmin();toast('Data telah dikembalikan ke kondisi awal');}
 function syncSeed(){
   if(!confirm('Perbarui daftar area dan klausul ke versi data awal terbaru? Penilaian yang tersimpan TIDAK akan dihapus.'))return;
@@ -2245,8 +2246,8 @@ function saveSafetyFinding(id,isNew){
   if(isLocked())return lockBlock();
   const d=DRAFT; d.safetyFindings=d.safetyFindings||[];
   const deskripsi=($('#sf-desk').value||'').trim();
-  if(!deskripsi){toast('Deskripsi temuan safety wajib diisi');return;}
-  if(!window._sfPhoto){toast('Foto temuan safety wajib dilampirkan');return;}
+  if(!deskripsi){toastError('Deskripsi temuan safety wajib diisi');return;}
+  if(!window._sfPhoto){toastError('Foto temuan safety wajib dilampirkan');return;}
   const obj={id,deskripsi,lokasi:($('#sf-lok').value||'').trim(),kategori:$('#sf-kat').value,foto:window._sfPhoto||'',tanggal:new Date().toISOString()};
   if(isNew)d.safetyFindings.push(obj);
   else{const i=d.safetyFindings.findIndex(s=>s.id===id);if(i>=0)d.safetyFindings[i]={...d.safetyFindings[i],...obj};}
@@ -2381,14 +2382,14 @@ async function viewSafetyPhoto(id){
   try{
     const res=await fetch(SYNC_URL+'?action=safetyPhotos&secret='+encodeURIComponent(SYNC_SECRET)+'&safetyId='+encodeURIComponent(id));
     const out=await res.json();
-    if(!out.ok){toast('Gagal mengambil foto');return;}
+    if(!out.ok){toastError('Gagal mengambil foto');return;}
     $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
       <h3>Foto Temuan Safety</h3>
       ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SEBELUM / TEMUAN</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
       ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SESUDAH / PERBAIKAN</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:''}
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
-  }catch(e){toast('Gagal mengambil foto');}
+  }catch(e){toastError('Gagal mengambil foto');}
 }
 
 /* ============ MODUL TINDAK LANJUT TEMUAN (tim TL per-PU + admin) ============
@@ -2399,7 +2400,7 @@ async function viewSafetyPhoto(id){
 let TL={tab:'temuan',sel:null,status:'Open',pu:'',view:(function(){try{return localStorage.getItem('tl_viewmode')||'desktop';}catch(e){return 'desktop';}})()};
 let _tlFindings=null,_tlSafety=null;
 let TL_DRAFT=(function(){try{return JSON.parse(localStorage.getItem('tl_draft'))||{};}catch(e){return {};}})();
-function _tlSaveDraft(){try{localStorage.setItem('tl_draft',JSON.stringify(TL_DRAFT));}catch(e){toast('Penyimpanan penuh — kirim draf ke Google dulu');}}
+function _tlSaveDraft(){try{localStorage.setItem('tl_draft',JSON.stringify(TL_DRAFT));}catch(e){toastError('Penyimpanan penuh — kirim draf ke Google dulu');}}
 function tlDirtyCount(){return Object.keys(TL_DRAFT).length;}
 function tlDraftSet(id,type,key,val){
   TL_DRAFT[id]=TL_DRAFT[id]||{_type:type};
@@ -2880,7 +2881,7 @@ function allFindings(){
   return out;
 }
 async function loadDashCloud(){
-  if(!SYNC_URL){toast('Sinkronisasi belum aktif');return;}
+  if(!SYNC_URL){toastError('Sinkronisasi belum aktif');return;}
   toast('Sedang mengambil temuan dari Google…');
   try{
     const res=await fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET));
@@ -2994,7 +2995,7 @@ async function lihatRiwayatStatus(findingId){
   }catch(e){ toast('Gagal mengambil riwayat (periksa sinyal): '+e.message); }
 }
 async function saveCloudFinding(id){
-  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
+  if(getAuth().role!=='admin'){toastError('Hanya administrator yang berwenang');return;}
   const payload={
     secret:SYNC_SECRET,type:'updateFinding',findingId:id,
     fields:{
@@ -3022,7 +3023,7 @@ async function saveCloudFinding(id){
    menaikkan versi config sehingga seluruh asesor menerima notifikasi pembaruan formulir
    (lewat checkRemoteConfig() yang sudah berjalan setiap kali aplikasi dibuka daring). */
 async function markAsStandard(id){
-  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
+  if(getAuth().role!=='admin'){toastError('Hanya administrator yang berwenang');return;}
   if(!confirm('Tambahkan foto perbaikan (after) pada temuan ini ke galeri foto standar/acuan untuk PU dan klausul yang sama? Foto akan tampil kepada asesor PU tersebut sebagai panduan penilaian berikutnya. Apabila galeri sudah berisi 3 foto, foto TERLAMA akan otomatis digantikan.'))return;
   toast('Sedang memproses…');
   try{
@@ -3042,7 +3043,7 @@ async function markAsStandard(id){
 /* (P-concern2) Batalkan status "Dijadikan Standar" — juga menghapus foto acuan
    terkait dari config (kalau belum ditimpa foto standar lain sejak saat itu). */
 async function unmarkAsStandard(id){
-  if(getAuth().role!=='admin'){toast('Hanya administrator yang berwenang');return;}
+  if(getAuth().role!=='admin'){toastError('Hanya administrator yang berwenang');return;}
   if(!confirm('Batalkan status foto standar pada temuan ini? Foto acuan untuk klausul ini akan dihapus dan formulir akan otomatis disinkronkan ulang.'))return;
   toast('Sedang memproses…');
   try{
@@ -3138,14 +3139,14 @@ async function viewBeforeAfter(id,isSafety){
       ? SYNC_URL+'?action=safetyPhotos&safetyId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET)
       : SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET);
     const out=await(await fetch(url)).json();
-    if(!out.ok){toast('Gagal mengambil foto');return;}
+    if(!out.ok){toastError('Gagal mengambil foto');return;}
     $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
       <h3>Foto Before / After</h3>
       ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">BEFORE (TEMUAN)</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
       ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">AFTER (PERBAIKAN)</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:'<p class="hint">Tim TL belum mengunggah foto perbaikan.</p>'}
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
-  }catch(e){toast('Gagal mengambil foto');}
+  }catch(e){toastError('Gagal mengambil foto');}
 }
 async function refreshAsrPending(){
   const auth=getAuth();

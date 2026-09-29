@@ -159,7 +159,8 @@ tr.tappable:active td{background:#F3F7F4}
 .modal-bg{position:fixed;inset:0;background:rgba(11,32,27,.55);z-index:100;display:flex;align-items:flex-end;justify-content:center}
 .modal{background:#fff;width:100%;max-width:680px;border-radius:18px 18px 0 0;padding:22px;max-height:88vh;overflow-y:auto}
 .modal h3{margin:0 0 16px;font-size:18px}
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:99px;font-size:14px;font-weight:600;z-index:200;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:up .3s}
+.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 20px;border-radius:99px;font-size:14px;font-weight:600;z-index:200;box-shadow:0 6px 24px rgba(0,0,0,.3);animation:up .3s;white-space:nowrap;max-width:88vw;overflow:hidden;text-overflow:ellipsis}
+.toast.toast-error{background:var(--red);border-radius:14px;padding:13px 16px;display:flex;align-items:center;gap:8px;white-space:normal;max-width:88vw;text-overflow:unset;overflow:visible}
 @keyframes up{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
 .empty{text-align:center;padding:40px 20px;color:var(--muted)}
 .empty .ic{font-size:40px;margin-bottom:10px;opacity:.4}
