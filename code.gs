@@ -206,7 +206,14 @@ function doPost(e) {
     var folderUrl = '';
     var photosGabung = {};
     for (var pgKey in (rec.photos || {})) photosGabung['good__' + pgKey] = rec.photos[pgKey];
-    for (var ptKey in (rec.photosTemuan || {})) photosGabung['temuan__' + ptKey] = rec.photosTemuan[ptKey];
+    // Buat map areaKey -> findingId agar nama file foto temuan menyertakan ID temuan
+    var areaKeyToFindingId = {};
+    (body.findings || []).forEach(function(f){ areaKeyToFindingId[(f.areaId||'')+'|'+(f.kategori||'')] = f.id; });
+    for (var ptKey in (rec.photosTemuan || {})) {
+      var fid = areaKeyToFindingId[ptKey] || '';
+      var fileKey = fid ? ('temuan__' + fid + '__' + ptKey) : ('temuan__' + ptKey);
+      photosGabung[fileKey] = rec.photosTemuan[ptKey];
+    }
     // Foto temuan safety (K3) ikut di-backup ke folder Drive sesi, prefix 'safety__'
     (body.safetyFindings || []).forEach(function(sf, i){
       if (sf && sf.foto) photosGabung['safety__' + (sf.id || i)] = [sf.foto];
