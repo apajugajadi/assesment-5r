@@ -1373,7 +1373,7 @@ function buatRingkasanNilai() {
       '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!F:F,B' + row + ',' + tab + '!G:G,"End*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
     );
     sh.getRange(row, 5).setFormula(
-      '=IF(AND(C' + row + '>0,D' + row + '>0),C' + row + '*$B$3/100+D' + row + '*$B$4/100,IF(D' + row + '>0,D' + row + ',C' + row + '))'
+      '=IF(AND(C' + row + '>0,D' + row + '>0),C' + row + '*$B$3/100+D' + row + '*$B$4/100,IF(D' + row + '>0,D' + row + '*$B$4/100,C' + row + '*$B$3/100))'
     );
     sh.getRange(row, 6).setValue(tVal || '');
     if (tVal > 0) {
@@ -1415,7 +1415,7 @@ function buatRingkasanNilai() {
       '=IFERROR(AVERAGEIFS(' + tab + '!J:J,' + tab + '!E:E,A' + row + ',' + tab + '!G:G,"End*",' + tab + '!N:N,$B$1,' + tab + '!O:O,$B$2),0)'
     );
     sh.getRange(row, 4).setFormula(
-      '=IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*$B$3/100+C' + row + '*$B$4/100,IF(C' + row + '>0,C' + row + ',B' + row + '))'
+      '=IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*$B$3/100+C' + row + '*$B$4/100,IF(C' + row + '>0,C' + row + '*$B$4/100,B' + row + '*$B$3/100))'
     );
     sh.getRange(row, 5).setValue(tPu ? Math.round(tPu * 100) / 100 : '');
     if (tPu > 0) {
@@ -1588,7 +1588,7 @@ function buatDashboard() {
     var valRange = sh.getRange(rValue, c0, 1, cw).merge();
     var mF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,"' + pu + '",' + tabA + '!G:G,"Mid*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
     var eF = 'IFERROR(AVERAGEIFS(' + tabA + '!J:J,' + tabA + '!E:E,"' + pu + '",' + tabA + '!G:G,"End*",' + tabA + '!N:N,$B$4,' + tabA + '!O:O,$B$5),0)';
-    valRange.setFormula('=ROUND(IF(AND(' + mF + '>0,' + eF + '>0),' + mF + '*' + wMid + '/100+' + eF + '*' + wEnd + '/100,IF(' + eF + '>0,' + eF + ',' + mF + ')),2)');
+    valRange.setFormula('=ROUND(IF(AND(' + mF + '>0,' + eF + '>0),' + mF + '*' + wMid + '/100+' + eF + '*' + wEnd + '/100,IF(' + eF + '>0,' + eF + '*' + wEnd + '/100,' + mF + '*' + wMid + '/100)),2)');
     valRange.setFontSize(22).setFontWeight('bold').setHorizontalAlignment('center')
       .setBackground('#ffffff').setBorder(true, true, false, true, false, false, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
     finalCellAddr.push(valRange.getCell(1, 1).getA1Notation());
@@ -1652,7 +1652,7 @@ function buatDashboard() {
     sh.getRange(row, 1).setValue(pu);
     sh.getRange(row, 2).setFormula('=ROUND(' + mF + ',2)');
     sh.getRange(row, 3).setFormula('=ROUND(' + eF + ',2)');
-    sh.getRange(row, 4).setFormula('=ROUND(IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*' + wMid + '/100+C' + row + '*' + wEnd + '/100,IF(C' + row + '>0,C' + row + ',B' + row + ')),2)');
+    sh.getRange(row, 4).setFormula('=ROUND(IF(AND(B' + row + '>0,C' + row + '>0),B' + row + '*' + wMid + '/100+C' + row + '*' + wEnd + '/100,IF(C' + row + '>0,C' + row + '*' + wEnd + '/100,B' + row + '*' + wMid + '/100)),2)');
     var tArr = Object.keys(targets).filter(function (k) { return k.indexOf(pu + '::') === 0; })
       .map(function (k) { return Number(targets[k]) || 0; }).filter(function (v) { return v > 0; });
     var tPu = tArr.length ? Math.round((tArr.reduce(function (a, b) { return a + b; }, 0) / tArr.length) * 100) / 100 : 0;
@@ -1881,28 +1881,155 @@ function cekTargets() {
   }
 }
 
-// Perbaikan sekali-pakai: nama lokasi "FL01 - FL04" (pakai spasi di sekitar strip,
-// versi lama di Kelola Formulir) vs "FL01-FL04" (tanpa spasi, versi yang benar-benar
-// tersimpan di data assessment PUG) bikin key target-nya "yatim" — tidak pernah
-// kebaca oleh Ringkasan/Dashboard. Fungsi ini memindahkan nilainya ke key yang benar.
-// Aman dijalankan berkali-kali (idempoten) — kalau key lama sudah tidak ada, tidak ngapa-ngapain.
-function fixTargetKeyFL01FL04() {
+// Perbaikan sekali-pakai (bisa dijalankan berkali-kali, idempoten): daftar key
+// target yang "yatim" karena nama lokasinya beda dikit dari yang benar-benar
+// tersimpan di data assessment — dipindahkan ke key yang benar biar kebaca oleh
+// Ringkasan/Dashboard. Tambahkan pasangan baru ke MAPPING kalau nanti ketemu
+// kasus serupa lagi (cek dulu pakai cekTargets() untuk tau key mana yang salah).
+var TARGET_KEY_FIXES = {
+  'PUG::FL01 - FL04': 'PUG::FL01-FL04',
+  'PUJ::Kantin & Endurock Cafe PUJ': 'PUJ::Kantin & Endurock',
+  'PUJ::Pos Security 1': 'PUJ::Post Security'
+};
+function fixTargetKeyMismatches() {
   var cfg = _readConfig() || {};
   cfg.targets = cfg.targets || {};
-  var keyLama = 'PUG::FL01 - FL04';
-  var keyBenar = 'PUG::FL01-FL04';
-  if (!Object.prototype.hasOwnProperty.call(cfg.targets, keyLama)) {
-    Logger.log('Key lama "' + keyLama + '" tidak ditemukan — mungkin sudah pernah diperbaiki, atau memang belum pernah diisi.');
-    return 'tidak ada perubahan';
+  var log = [], berubah = false;
+  for (var keyLama in TARGET_KEY_FIXES) {
+    var keyBenar = TARGET_KEY_FIXES[keyLama];
+    if (!Object.prototype.hasOwnProperty.call(cfg.targets, keyLama)) {
+      log.push('"' + keyLama + '" tidak ditemukan — dilewati (sudah diperbaiki / belum pernah diisi).');
+      continue;
+    }
+    var nilai = cfg.targets[keyLama];
+    cfg.targets[keyBenar] = nilai;
+    delete cfg.targets[keyLama];
+    berubah = true;
+    log.push('Dipindahkan: "' + keyLama + '" (' + nilai + ') -> "' + keyBenar + '"');
   }
-  var nilai = cfg.targets[keyLama];
-  cfg.targets[keyBenar] = nilai;
-  delete cfg.targets[keyLama];
-  cfg.version = (cfg.version || 1) + 1;
-  _writeConfig(cfg);
+  if (berubah) {
+    cfg.version = (cfg.version || 1) + 1;
+    _writeConfig(cfg);
+    _refreshRingkasanDashboard();
+    log.push('Ringkasan & Dashboard di-refresh ulang.');
+  }
+  Logger.log(log.join('\n'));
+  return log.join('\n');
+}
+// Alias lama, tetap ada biar kalau masih dipanggil dari suatu tempat tidak error.
+function fixTargetKeyFL01FL04() { return fixTargetKeyMismatches(); }
+
+// ============================================================
+//  PEMBERSIHAN DATA TARGET (per Tahun + Periode) — buat trial berulang
+// ============================================================
+// EDIT DUA VARIABEL INI DULU sebelum Run (Apps Script tidak bisa terima
+// parameter langsung dari tombol Run di editor):
+//   CLEANSE_TAHUN   -> tahun yang mau dibersihkan, mis. 2026
+//   CLEANSE_PERIODE -> 'Mid' atau 'End' (dicocokkan sebagai awalan kata pada
+//                      kolom Periode, jadi "Mid Year 2026" ikut kena "Mid")
+// Menghapus HANYA baris yang cocok Tahun+Periode itu, di tab: Assessment,
+// Detail, Temuan (di-join lewat ID Sesi karena Temuan tidak punya kolom
+// Tahun), SafetyFindings, dan RiwayatStatus (di-join lewat ID Temuan).
+// TIDAK disentuh sama sekali: tab Users, config_master.json (form induk/
+// target/bobot), dan foto-foto di folder Drive (beda dari cleanseData()
+// versi penuh yang membuang SEMUA subfolder foto — di sini foto dibiarkan,
+// hapus manual dari Drive kalau memang perlu, karena pencocokan otomatis
+// folder foto ke sesi tertentu berisiko salah hapus).
+// Aman dijalankan berkali-kali; kalau tidak ada yang cocok, tidak menghapus apa pun.
+var CLEANSE_TAHUN = 2026;
+var CLEANSE_PERIODE = 'Mid'; // 'Mid' atau 'End'
+
+function cleanseDataByPeriode() {
+  var tahun = CLEANSE_TAHUN, periodeKata = CLEANSE_PERIODE;
+  if (!tahun || !periodeKata) return 'Isi dulu CLEANSE_TAHUN dan CLEANSE_PERIODE di atas fungsi ini.';
+  var ss = _getSheet();
+  var log = [];
+  var sesiDihapus = {}; // {ID Sesi: true} — dikumpulkan dari Assessment, dipakai buat filter Temuan
+
+  // ---- Assessment ----
+  var shA = ss.getSheetByName(SHEET_DATA);
+  if (shA && shA.getLastRow() > 1) {
+    var headA = shA.getRange(1, 1, 1, shA.getLastColumn()).getValues()[0];
+    var iIdA = headA.indexOf('ID Sesi'), iTahunA = headA.indexOf('Tahun'), iPerA = headA.indexOf('Periode');
+    var valsA = shA.getRange(2, 1, shA.getLastRow() - 1, shA.getLastColumn()).getValues();
+    var n = 0;
+    for (var r = valsA.length - 1; r >= 0; r--) {
+      var cocokTahun = String(valsA[r][iTahunA]) === String(tahun);
+      var cocokPeriode = String(valsA[r][iPerA] || '').toLowerCase().indexOf(periodeKata.toLowerCase()) === 0;
+      if (cocokTahun && cocokPeriode) {
+        sesiDihapus[valsA[r][iIdA]] = true;
+        shA.deleteRow(r + 2);
+        n++;
+      }
+    }
+    log.push('Assessment: ' + n + ' baris dihapus');
+  }
+
+  // ---- Detail (punya kolom Tahun & Periode sendiri) ----
+  var shD = ss.getSheetByName(SHEET_DETAIL);
+  if (shD && shD.getLastRow() > 1) {
+    var headD = shD.getRange(1, 1, 1, shD.getLastColumn()).getValues()[0];
+    var iTahunD = headD.indexOf('Tahun'), iPerD = headD.indexOf('Periode');
+    var valsD = shD.getRange(2, 1, shD.getLastRow() - 1, shD.getLastColumn()).getValues();
+    var n = 0;
+    for (var r = valsD.length - 1; r >= 0; r--) {
+      var cocokTahun = String(valsD[r][iTahunD]) === String(tahun);
+      var cocokPeriode = String(valsD[r][iPerD] || '').toLowerCase().indexOf(periodeKata.toLowerCase()) === 0;
+      if (cocokTahun && cocokPeriode) { shD.deleteRow(r + 2); n++; }
+    }
+    log.push('Detail: ' + n + ' baris dihapus');
+  }
+
+  // ---- Temuan (tidak punya Tahun -> filter via ID Sesi yang sudah dihapus) ----
+  var idTemuanDihapus = [];
+  var shT = ss.getSheetByName(SHEET_TEMUAN);
+  if (shT && shT.getLastRow() > 1) {
+    var headT = shT.getRange(1, 1, 1, shT.getLastColumn()).getValues()[0];
+    var iIdTemuan = headT.indexOf('ID Temuan'), iSesiT = headT.indexOf('ID Sesi');
+    var valsT = shT.getRange(2, 1, shT.getLastRow() - 1, shT.getLastColumn()).getValues();
+    var n = 0;
+    for (var r = valsT.length - 1; r >= 0; r--) {
+      if (sesiDihapus[valsT[r][iSesiT]]) {
+        idTemuanDihapus.push(valsT[r][iIdTemuan]);
+        shT.deleteRow(r + 2);
+        n++;
+      }
+    }
+    log.push('Temuan: ' + n + ' baris dihapus (via ID Sesi)');
+  }
+
+  // ---- SafetyFindings (punya Tahun & Periode sendiri) ----
+  var shS = ss.getSheetByName(SHEET_SAFETY);
+  if (shS && shS.getLastRow() > 1) {
+    var headS = shS.getRange(1, 1, 1, shS.getLastColumn()).getValues()[0];
+    var iTahunS = headS.indexOf('Tahun'), iPerS = headS.indexOf('Periode');
+    var valsS = shS.getRange(2, 1, shS.getLastRow() - 1, shS.getLastColumn()).getValues();
+    var n = 0;
+    for (var r = valsS.length - 1; r >= 0; r--) {
+      var cocokTahun = String(valsS[r][iTahunS]) === String(tahun);
+      var cocokPeriode = String(valsS[r][iPerS] || '').toLowerCase().indexOf(periodeKata.toLowerCase()) === 0;
+      if (cocokTahun && cocokPeriode) { shS.deleteRow(r + 2); n++; }
+    }
+    log.push('SafetyFindings: ' + n + ' baris dihapus');
+  }
+
+  // ---- RiwayatStatus (filter via ID Temuan yang sudah dihapus) ----
+  var shR = ss.getSheetByName(SHEET_RIWAYAT);
+  if (shR && shR.getLastRow() > 1 && idTemuanDihapus.length) {
+    var idSet = {};
+    idTemuanDihapus.forEach(function (id) { idSet[id] = true; });
+    var valsR = shR.getRange(2, 1, shR.getLastRow() - 1, shR.getLastColumn()).getValues();
+    var n = 0;
+    for (var r = valsR.length - 1; r >= 0; r--) {
+      if (idSet[valsR[r][0]]) { shR.deleteRow(r + 2); n++; }
+    }
+    log.push('RiwayatStatus: ' + n + ' baris dihapus (via ID Temuan)');
+  }
+
+  log.push('CATATAN: Users & config_master.json (target/bobot) TIDAK disentuh. Foto di Drive juga TIDAK ikut dihapus otomatis — hapus manual dari folder Drive kalau perlu.');
   _refreshRingkasanDashboard();
-  Logger.log('Dipindahkan: "' + keyLama + '" (' + nilai + ') -> "' + keyBenar + '". Ringkasan & Dashboard di-refresh ulang.');
-  return 'OK — nilai ' + nilai + ' dipindah ke key "' + keyBenar + '"';
+  Logger.log(log.join('\n'));
+  return log.join('\n');
 }
 
 // ---- fungsi pemeriksaan manual (jalankan dari editor bila diperlukan) ----

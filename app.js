@@ -2731,12 +2731,14 @@ function drawDashNilai(){
     const vals=locs.map(l=>{const o=byLocPer[pu+'::'+l+'::'+per];return o?o.nilai:0;}).filter(v=>v>0);
     return vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
   }
-  // nilai final tertimbang PU: kalau End belum ada -> tampilkan Mid apa adanya
+  // nilai final tertimbang PU: kalau salah satu periode belum ada, porsi bobotnya
+  // dihitung 0 (bukan diisi 100% dari periode yang ada) — jadi Final selalu
+  // proporsional terhadap bobot Mid/End yang sudah disepakati, sekalipun belum lengkap.
   function puFinal(pu){
     const mid=puNilaiPeriode(pu,'mid'), end=puNilaiPeriode(pu,'end');
     if(mid>0 && end>0) return {final:mid*wMid+end*wEnd, mid, end, lengkap:true};
-    if(end>0) return {final:end, mid, end, lengkap:false};
-    return {final:mid, mid, end, lengkap:false};
+    if(end>0) return {final:end*wEnd, mid, end, lengkap:false};
+    return {final:mid*wMid, mid, end, lengkap:false};
   }
   const pus=Object.keys(STORE.config.matrix).filter(pu=>{
     return Object.keys(STORE.config.matrix[pu]||{}).some(l=>byLocPer[pu+'::'+l+'::mid']||byLocPer[pu+'::'+l+'::end']);
@@ -2805,7 +2807,7 @@ function drawDashNilai(){
       const detailBody=locs.map(loc=>{
         const midL=byLocPer[p.pu+'::'+loc+'::mid'],endL=byLocPer[p.pu+'::'+loc+'::end'];
         const tgt=targetLoc(p.pu,loc);
-        const finalL=(midL&&endL)?(midL.nilai*wMid+endL.nilai*wEnd):(endL?endL.nilai:(midL?midL.nilai:0));
+        const finalL=(midL&&endL)?(midL.nilai*wMid+endL.nilai*wEnd):(endL?endL.nilai*wEnd:(midL?midL.nilai*wMid:0));
         if(!midL&&!endL)return '';
         return `<div class="klausul-row"><span class="kl-q">${esc(loc)}</span>
           <span class="kl-tag" style="color:var(--muted)">Mid ${midL?midL.nilai.toFixed(2):'—'} · End ${endL?endL.nilai.toFixed(2):'—'}</span>
