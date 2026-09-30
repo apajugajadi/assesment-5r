@@ -1225,10 +1225,22 @@ async function syncSession(id){
       rec.synced=true;rec.syncedAt=new Date().toISOString();rec.locked=true;
       rec.syncCount=out.syncCount||((rec.syncCount||0)+1);saveStore();
       const dup=out.duplicateWarning;
-      const dupMsg=dup?`\n\n⚠️ PERINGATAN DATA GANDA\nKombinasi ${esc(dup.pu)} — ${esc(dup.loc)} · ${esc(dup.periode)} ${esc(dup.tahun)} [${jenisLabel(dup.jenis)}] SUDAH pernah dinilai oleh asesor lain: ${esc(dup.asesorLain)}.\nMohon koordinasikan dengan admin untuk memastikan data mana yang dipakai sebagai acuan resmi.`:'';
-      alert('BERHASIL DIKIRIM\n\n'+esc(rec.pu)+' — '+esc(rec.loc)+'\nJumlah foto terkirim: '+(out.photos||0)+'\n\nSesi ini kini terkunci dan hanya dapat dibaca.'+dupMsg);
+      const dupHtml=dup?`<div style="margin-top:12px;padding:10px 12px;background:#FEF3CD;border-radius:8px;border-left:3px solid var(--amber);font-size:13px;text-align:left">
+        <b>⚠️ Peringatan Data Ganda</b><br>Kombinasi <b>${esc(dup.pu)} — ${esc(dup.loc)} · ${esc(dup.periode)} ${esc(dup.tahun)}</b> sudah pernah dinilai oleh asesor lain: <b>${esc(dup.asesorLain)}</b>.<br>Mohon koordinasikan dengan admin.
+      </div>`:'';
+      $('#modal-root').innerHTML=`<div class="modal-bg"><div class="modal" style="text-align:center;max-width:360px">
+        <div style="font-size:36px;margin-bottom:8px">✅</div>
+        <div style="font-weight:800;font-family:Archivo;font-size:17px;margin-bottom:4px">Berhasil Dikirim!</div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:4px">${esc(rec.pu)} — ${esc(rec.loc)}</div>
+        <div style="font-size:13px;margin-bottom:2px">Foto terkirim: <b>${out.photos||0}</b></div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Sesi ini kini terkunci dan hanya dapat dibaca.</div>
+        ${dupHtml}
+        <div style="display:flex;gap:10px;margin-top:18px">
+          <button class="btn btn-ghost" style="flex:1" onclick="closeModal();render()">Lihat Hasil</button>
+          <button class="btn btn-primary" style="flex:1" onclick="closeModal();VIEW='home';DRAFT=null;render()">Kembali ke Beranda</button>
+        </div>
+      </div></div>`;
       if(VIEW==='admin')renderAdmin();
-      if(VIEW==='report')render();
     }else alert('GAGAL mengirim data.\n\nPenyebab: '+(out.error||'tidak diketahui'));
   }catch(e){hideSyncProgress();alert('GAGAL mengirim data. Mohon periksa sinyal atau koneksi internet.\n\nRincian: '+e.message);}
 }
