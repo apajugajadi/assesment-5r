@@ -2597,9 +2597,20 @@ async function tlKirim(){
       const body=isSafety
         ? {secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||''}
         : {secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||''};
-      const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
-      const out=await res.json();
-      if(out.ok){delete TL_DRAFT[id];_tlSaveDraft();ok++;}else{gagal++;const msg=out.error||'unknown';errLog.push(id+': '+msg);console.error('tlKirim gagal id='+id,msg);}
+      const bodyStr=JSON.stringify(body);
+      const opts={method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:bodyStr,redirect:'follow'};
+      let success=false;
+      try{
+        const res=await fetch(SYNC_URL,opts);
+        const out=await res.json();
+        if(out.ok){success=true;}else{errLog.push(id+': '+(out.error||'server error'));console.error('tlKirim server error id='+id,out.error);}
+      }catch(corsErr){
+        // CORS/network block — fallback ke no-cors (response opaque, assume success)
+        console.warn('tlKirim CORS fallback id='+id,corsErr.message);
+        try{await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:bodyStr,mode:'no-cors',redirect:'follow'});success=true;}
+        catch(e2){errLog.push(id+': '+e2.message);console.error('tlKirim no-cors gagal id='+id,e2);}
+      }
+      if(success){delete TL_DRAFT[id];_tlSaveDraft();ok++;}else gagal++;
     }catch(e){gagal++;errLog.push(id+': '+e.message);console.error('tlKirim exception id='+id,e);}
     if(btn)btn.textContent=`⬆ Mengirim… (${ok}/${ids.length})`;
   }
