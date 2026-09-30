@@ -1492,7 +1492,13 @@ var DASH_ASPEK = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 function _refreshRingkasanDashboard() {
   try { buatRingkasanNilai(); } catch (e) { Logger.log('Auto-refresh Ringkasan gagal: ' + e); }
   try { buatDashboard(); } catch (e) { Logger.log('Auto-refresh Dashboard gagal: ' + e); }
-  try { buatRingkasanTemuan(); } catch (e) { Logger.log('Auto-refresh Ringkasan Temuan gagal: ' + e); }
+  // Ringkasan Temuan/Safety pakai formula live — cukup buat sekali bila tab belum ada
+  try {
+    var _ss = _getSheet();
+    if (!_ss.getSheetByName('Ringkasan Temuan') || !_ss.getSheetByName('Ringkasan Safety')) {
+      buatRingkasanTemuan();
+    }
+  } catch (e) { Logger.log('Setup Ringkasan Temuan gagal: ' + e); }
 }
 
 // Jalankan SEKALI (dari editor, pilih fungsi ini di dropdown) SEBELUM buatDashboard()
@@ -2271,164 +2277,196 @@ function cekID() {
 }
 
 // ============================================================
-//  RINGKASAN TEMUAN — tab ringkas buat admin kelola TL langsung di Sheets
+//  RINGKASAN TEMUAN — formula live (QUERY + COUNTIFS), selalu up-to-date
 // ============================================================
-// Menampilkan semua temuan dari tab Temuan & SafetyFindings dalam satu view
-// yang rapi: kolom foto DataURL dibuang, diurutkan Open → Menunggu Verifikasi
-// → Close, dengan conditional formatting traffic-light per Status.
-// Auto-refresh setiap ada sync assessment atau update temuan masuk.
-// Admin bisa edit Status, Penyebab, Deskripsi Perbaikan, dll langsung di tab ini
-// (TIDAK tersambung balik ke tab Temuan — perubahan perlu dilakukan di tab Temuan
-// yang asli atau lewat web app; tab ini murni VIEW yang selalu di-regenerate ulang).
-// Kalau mau jalankan manual: pilih "buatRingkasanTemuan" di dropdown editor, Run.
+// Tab ini murni VIEW berbasis formula — tidak perlu di-refresh setiap sync.
+// Data diambil langsung dari tab Temuan / SafetyFindings via QUERY formula,
+// urutan Open → Menunggu Verifikasi → Close (memanfaatkan sort abjad DESC:
+// "Open" > "Menunggu Verifikasi" > "Close" secara alfabetis).
+// Scorecard KPI (Total/Open/Menunggu/Close) dan rekap per-PU menggunakan
+// COUNTIFS — ikut update otomatis setiap isi tab Temuan berubah.
+// Jalankan "buatRingkasanTemuan" dari editor SEKALI untuk setup awal (atau
+// bila ada PU baru yang perlu masuk ke scorecard per-PU).
+
+// Kolom yang ditampilkan di Ringkasan Temuan (urutan = urutan kolom output)
 var RT_KOLOM = [
   'Status','PU','Lokasi','Area','Kategori','Deskripsi','Penyebab',
   'Target','Deskripsi Perbaikan','Tgl Perbaikan','Dihubungi',
   'Verifikator','Berulang','Tanggal Temuan','Update Terakhir',
   'Catatan Verifikasi','Saran','Skor','Periode','Asesor','ID Temuan','Folder Foto'
 ];
+// Kolom yang ditampilkan di Ringkasan Safety (tanpa foto DataURL, tanpa kolom tak ada)
 var RT_SAFETY_KOLOM = [
-  'Status','PU','Lokasi','Kategori','Lokasi Titik','Deskripsi','Target Selesai',
+  'Status','PU','Lokasi','Kategori','Lokasi Titik','Deskripsi',
   'Deskripsi Perbaikan','Tgl Perbaikan','Dihubungi',
   'Verifikator','Tanggal Temuan','Update Terakhir',
   'Catatan Verifikasi','Periode','Tahun','Asesor','ID Safety','Folder Foto'
 ];
-var RT_STATUS_ORDER = {'Open':0,'Menunggu Verifikasi':1,'Close':2};
+
+// Pemetaan kolom sumber → huruf kolom di sheet (sesuai HEAD_TEMUAN / HEAD_SAFETY)
+// RT_KOLOM → HEAD_TEMUAN: Status=O, PU=C, Lokasi=D, Area=G, Kategori=H, Deskripsi=J,
+//   Penyebab=R, Target=L, Deskripsi Perbaikan=M, Tgl Perbaikan=N, Dihubungi=AA,
+//   Verifikator=P, Berulang=S, Tanggal Temuan=AB, Update Terakhir=Z,
+//   Catatan Verifikasi=Y, Saran=K, Skor=I, Periode=E, Asesor=F, ID Temuan=A, Folder Foto=Q
+var RT_TEMUAN_SELECT  = 'O,C,D,G,H,J,R,L,M,N,AA,P,S,AB,Z,Y,K,I,E,F,A,Q';
+var RT_TEMUAN_STATUS  = 'O';   // kolom Status di tab Temuan
+var RT_TEMUAN_PU      = 'C';   // kolom PU di tab Temuan
+var RT_TEMUAN_LASTCOL = 'AB';  // kolom terakhir HEAD_TEMUAN
+
+// RT_SAFETY_KOLOM → HEAD_SAFETY: Status=M, PU=C, Lokasi=D, Kategori=I,
+//   Lokasi Titik=J, Deskripsi=K, Deskripsi Perbaikan=N, Tgl Perbaikan=O,
+//   Dihubungi=V, Verifikator=P, Tanggal Temuan=L, Update Terakhir=U,
+//   Catatan Verifikasi=T, Periode=E, Tahun=F, Asesor=G, ID Safety=A, Folder Foto=S
+var RT_SAFETY_SELECT  = 'M,C,D,I,J,K,N,O,V,P,L,U,T,E,F,G,A,S';
+var RT_SAFETY_STATUS  = 'M';
+var RT_SAFETY_PU      = 'C';
+var RT_SAFETY_LASTCOL = 'V';
 
 function buatRingkasanTemuan() {
   var ss = _getSheet();
-
-  // ---- BAGIAN 1: TEMUAN 5R ----
-  _buatTabRingkasanTemuan(ss, 'Ringkasan Temuan', SHEET_TEMUAN, RT_KOLOM, 'Temuan 5R');
-
-  // ---- BAGIAN 2: SAFETY (K3) ----
-  _buatTabRingkasanTemuan(ss, 'Ringkasan Safety', SHEET_SAFETY, RT_SAFETY_KOLOM, 'Temuan Safety (K3)');
-
-  Logger.log('Ringkasan Temuan & Safety selesai dibuat/diperbarui.');
+  _buatTabRingkasanTemuan(ss, 'Ringkasan Temuan', SHEET_TEMUAN, RT_KOLOM,
+    'Temuan 5R', RT_TEMUAN_SELECT, RT_TEMUAN_STATUS, RT_TEMUAN_PU, RT_TEMUAN_LASTCOL);
+  _buatTabRingkasanTemuan(ss, 'Ringkasan Safety', SHEET_SAFETY, RT_SAFETY_KOLOM,
+    'Temuan Safety (K3)', RT_SAFETY_SELECT, RT_SAFETY_STATUS, RT_SAFETY_PU, RT_SAFETY_LASTCOL);
+  Logger.log('Ringkasan Temuan & Safety (formula-based) selesai dibuat.');
   return 'OK';
 }
 
-function _buatTabRingkasanTemuan(ss, tabName, sourceTab, kolomList, sectionLabel) {
-  var shSrc = ss.getSheetByName(sourceTab);
-  if (!shSrc || shSrc.getLastRow() < 2) {
-    // Buat tab kosong biar tidak error
-    var shE = ss.getSheetByName(tabName);
-    if (!shE) shE = ss.insertSheet(tabName);
-    shE.clearContents();
-    shE.getRange(1,1).setValue('Belum ada data ' + sectionLabel + '.');
-    return;
+function _buatTabRingkasanTemuan(ss, tabName, srcName, kolomList, label, selectCols, statusCol, puCol, lastCol) {
+  // Baca daftar PU unik dari sumber (untuk scorecard per-PU — COUNTIFS tetap live)
+  var shSrc = ss.getSheetByName(srcName);
+  var pus = [];
+  if (shSrc && shSrc.getLastRow() > 1) {
+    var srcHead = shSrc.getRange(1,1,1,shSrc.getLastColumn()).getValues()[0];
+    var iPU0 = srcHead.indexOf('PU');
+    if (iPU0 >= 0) {
+      var puVals = shSrc.getRange(2, iPU0+1, shSrc.getLastRow()-1, 1).getValues();
+      var seenPU = {};
+      puVals.forEach(function(r){ var p=String(r[0]||'').trim(); if(p&&!seenPU[p]){seenPU[p]=true;pus.push(p);} });
+      pus.sort();
+    }
   }
 
-  // Baca data sumber
-  var srcVals = shSrc.getRange(1, 1, shSrc.getLastRow(), shSrc.getLastColumn()).getValues();
-  var head = srcVals[0];
-
-  // Petakan kolom yang diminta ke index di sheet sumber
-  var colIdx = kolomList.map(function(k){ return head.indexOf(k); });
-
-  // Ambil data baris (skip header), abaikan baris kosong (kolom A kosong)
-  var rows = [];
-  for (var r = 1; r < srcVals.length; r++) {
-    if (!srcVals[r][0]) continue;
-    var row = colIdx.map(function(i){ return i >= 0 ? srcVals[r][i] : ''; });
-    rows.push(row);
-  }
-
-  // Sort: Open → Menunggu Verifikasi → Close → sisanya
-  var iStatus = 0; // Status selalu kolom pertama di RT_KOLOM
-  rows.sort(function(a, b){
-    var oa = RT_STATUS_ORDER[a[iStatus]] != null ? RT_STATUS_ORDER[a[iStatus]] : 9;
-    var ob = RT_STATUS_ORDER[b[iStatus]] != null ? RT_STATUS_ORDER[b[iStatus]] : 9;
-    if (oa !== ob) return oa - ob;
-    // secondary sort: PU lalu Lokasi
-    var pa = String(a[1]||''), pb = String(b[1]||'');
-    if (pa !== pb) return pa.localeCompare(pb);
-    return String(a[2]||'').localeCompare(String(b[2]||''));
-  });
-
-  // Tulis ke tab tujuan
-  var sh = ss.getSheetByName(tabName);
-  if (sh) ss.deleteSheet(sh);
-  sh = ss.insertSheet(tabName);
+  // Buat ulang tab (setup sekali, lalu formula yang kerja)
+  var oldSh = ss.getSheetByName(tabName);
+  if (oldSh) ss.deleteSheet(oldSh);
+  var sh = ss.insertSheet(tabName);
   sh.setTabColor(DASH_COLOR.mid);
 
-  // Header judul
-  var totalCols = kolomList.length;
-  sh.getRange(1, 1, 1, totalCols).merge()
-    .setValue(sectionLabel.toUpperCase() + ' — Ringkasan Tindak Lanjut')
+  var nCols = kolomList.length;
+  var src = "'" + srcName + "'";
+  var srcRange = src + '!A2:' + lastCol;
+
+  // ---- Baris 1: Judul ----
+  sh.getRange(1,1,1,nCols).merge()
+    .setValue(label.toUpperCase() + ' — Ringkasan Tindak Lanjut')
     .setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
-    .setFontWeight('bold').setFontSize(13).setHorizontalAlignment('left')
-    .setVerticalAlignment('middle');
-  sh.setRowHeight(1, 28);
+    .setFontWeight('bold').setFontSize(13).setHorizontalAlignment('left').setVerticalAlignment('middle');
+  sh.setRowHeight(1, 30);
 
-  var tsStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone()||'GMT+7', 'dd MMM yyyy HH:mm');
-  sh.getRange(2, 1, 1, totalCols).merge()
-    .setValue('Diperbarui: ' + tsStr + '  ·  Total: ' + rows.length + ' temuan  ·  Open: ' +
-      rows.filter(function(r){return r[0]==='Open';}).length + '  ·  Menunggu: ' +
-      rows.filter(function(r){return r[0]==='Menunggu Verifikasi';}).length + '  ·  Close: ' +
-      rows.filter(function(r){return r[0]==='Close';}).length)
+  sh.getRange(2,1,1,nCols).merge()
+    .setValue('Data live dari tab ' + srcName + ' · Diperbarui otomatis · Urutan: Open → Menunggu Verifikasi → Close')
     .setBackground(DASH_COLOR.bg).setFontColor(DASH_COLOR.muted).setFontSize(9).setFontStyle('italic');
-  sh.setRowHeight(2, 18);
+  sh.setRowHeight(2, 16);
 
-  // Header kolom
-  var headerRow = 3;
-  sh.getRange(headerRow, 1, 1, totalCols).setValues([kolomList])
-    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff')
-    .setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center')
+  // ---- KPI Cards (baris 3-5): Total | Open | Menunggu Verifikasi | Close ----
+  var kW = Math.floor(nCols / 4);
+  var kpiDef = [
+    { label:'TOTAL',               bg:DASH_COLOR.dark, formula:'=COUNTA('+src+'!'+puCol+'2:'+puCol+')' },
+    { label:'OPEN',                bg:DASH_COLOR.red,  formula:'=COUNTIF('+src+'!'+statusCol+'2:'+statusCol+',"Open")' },
+    { label:'MENUNGGU VERIFIKASI', bg:'#9A6B00',       formula:'=COUNTIF('+src+'!'+statusCol+'2:'+statusCol+',"Menunggu Verifikasi")' },
+    { label:'CLOSE',               bg:DASH_COLOR.mid,  formula:'=COUNTIF('+src+'!'+statusCol+'2:'+statusCol+',"Close")' }
+  ];
+  for (var k = 0; k < 4; k++) {
+    var c0 = k*kW+1, w = (k===3)?(nCols-3*kW):kW;
+    var d = kpiDef[k];
+    sh.getRange(3,c0,1,w).merge().setValue(d.label)
+      .setBackground(d.bg).setFontColor('#ffffff').setFontWeight('bold').setFontSize(9).setHorizontalAlignment('center');
+    sh.getRange(4,c0,1,w).merge().setFormula(d.formula)
+      .setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setBackground('#ffffff')
+      .setBorder(false,true,false,true,false,false,DASH_COLOR.line,SpreadsheetApp.BorderStyle.SOLID);
+    sh.getRange(5,c0,1,w).merge().setValue('')
+      .setBackground('#ffffff').setBorder(false,true,true,true,false,false,DASH_COLOR.line,SpreadsheetApp.BorderStyle.SOLID);
+  }
+  sh.setRowHeight(3,20); sh.setRowHeight(4,38); sh.setRowHeight(5,4);
+
+  // ---- Rekap per-PU (baris 6 dst) ----
+  sh.getRange(6,1,1,nCols).merge()
+    .setValue('REKAP PER PU')
+    .setBackground(DASH_COLOR.bg).setFontColor(DASH_COLOR.dark).setFontWeight('bold').setFontSize(10)
     .setVerticalAlignment('middle');
-  sh.setRowHeight(headerRow, 22);
-  sh.setFrozenRows(headerRow);
+  sh.setRowHeight(6, 20);
 
-  if (!rows.length) {
-    sh.getRange(headerRow+1, 1).setValue('Tidak ada data.');
-    return;
-  }
+  var puHdrVals = ['PU','Total','Open','Menunggu Verifikasi','Close'];
+  sh.getRange(7,1,1,puHdrVals.length).setValues([puHdrVals])
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff').setFontWeight('bold').setFontSize(9)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.setRowHeight(7, 20);
 
-  // Tulis data
-  var dataRange = sh.getRange(headerRow+1, 1, rows.length, totalCols);
-  dataRange.setValues(rows).setVerticalAlignment('top').setFontSize(10);
-  sh.getRange(headerRow+1, 1, rows.length, totalCols)
-    .setBorder(true, true, true, true, true, true, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
-
-  // Zebra striping + highlight per status
-  for (var i = 0; i < rows.length; i++) {
-    var rn = headerRow + 1 + i;
-    var st = rows[i][iStatus];
-    var bg;
-    if (st === 'Open')                bg = '#FBEEEC';
-    else if (st === 'Menunggu Verifikasi') bg = '#FEF9EC';
-    else if (st === 'Close')          bg = '#EAF5EC';
-    else                              bg = i % 2 === 0 ? '#ffffff' : DASH_COLOR.bg;
-    sh.getRange(rn, 1, 1, totalCols).setBackground(bg);
-  }
-
-  // Kolom Status: bold + warna teks
-  var statusRanges = {Open:[], 'Menunggu Verifikasi':[], Close:[]};
-  for (var i = 0; i < rows.length; i++) {
-    var st = rows[i][iStatus];
-    if (statusRanges[st]) statusRanges[st].push(sh.getRange(headerRow+1+i, 1));
-  }
-  if (statusRanges['Open'].length) {
-    statusRanges['Open'].forEach(function(r){r.setFontColor(DASH_COLOR.red).setFontWeight('bold');});
-  }
-  if (statusRanges['Menunggu Verifikasi'].length) {
-    statusRanges['Menunggu Verifikasi'].forEach(function(r){r.setFontColor('#9A6B00').setFontWeight('bold');});
-  }
-  if (statusRanges['Close'].length) {
-    statusRanges['Close'].forEach(function(r){r.setFontColor(DASH_COLOR.mid).setFontWeight('bold');});
-  }
-
-  // Wrap text kolom Deskripsi & Deskripsi Perbaikan supaya terbaca
-  var wrapCols = ['Deskripsi','Deskripsi Perbaikan','Catatan Verifikasi','Saran'];
-  wrapCols.forEach(function(col){
-    var ci = kolomList.indexOf(col);
-    if (ci >= 0) sh.getRange(headerRow+1, ci+1, rows.length, 1).setWrap(true);
+  pus.forEach(function(pu, i) {
+    var row = 8 + i;
+    sh.getRange(row,1).setValue(pu).setFontWeight('bold').setFontColor(DASH_COLOR.dark);
+    // Total: COUNTIF PU (dari baris 2 ke bawah, skip header)
+    sh.getRange(row,2).setFormula('=COUNTIF('+src+'!'+puCol+'2:'+puCol+',"'+pu+'")');
+    // Per-status: COUNTIFS PU + Status
+    sh.getRange(row,3).setFormula('=COUNTIFS('+src+'!'+puCol+'2:'+puCol+',"'+pu+'",'+src+'!'+statusCol+'2:'+statusCol+',"Open")');
+    sh.getRange(row,4).setFormula('=COUNTIFS('+src+'!'+puCol+'2:'+puCol+',"'+pu+'",'+src+'!'+statusCol+'2:'+statusCol+',"Menunggu Verifikasi")');
+    sh.getRange(row,5).setFormula('=COUNTIFS('+src+'!'+puCol+'2:'+puCol+',"'+pu+'",'+src+'!'+statusCol+'2:'+statusCol+',"Close")');
+    sh.getRange(row,1,1,5)
+      .setBorder(true,true,true,true,true,true,DASH_COLOR.line,SpreadsheetApp.BorderStyle.SOLID)
+      .setFontSize(9).setHorizontalAlignment('center').setVerticalAlignment('middle');
+    sh.getRange(row,1).setHorizontalAlignment('left');
+    if (i%2===1) sh.getRange(row,1,1,5).setBackground(DASH_COLOR.bg);
+    sh.setRowHeight(row, 18);
   });
+  // Warna teks per-kolom status di scorecard per-PU
+  if (pus.length) {
+    sh.getRange(8,3,pus.length,1).setFontColor(DASH_COLOR.red);   // Open = merah
+    sh.getRange(8,4,pus.length,1).setFontColor('#9A6B00');         // Menunggu = amber
+    sh.getRange(8,5,pus.length,1).setFontColor(DASH_COLOR.mid);   // Close = hijau
+  }
 
-  sh.autoResizeColumns(1, totalCols);
-  // Batasi lebar kolom teks panjang biar tidak terlalu melebar
+  // ---- Header kolom data ----
+  var hdrRow = 8 + pus.length + 2; // jeda 1 baris kosong setelah per-PU
+  sh.getRange(hdrRow,1,1,nCols).setValues([kolomList])
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff').setFontWeight('bold').setFontSize(10)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.setRowHeight(hdrRow, 24);
+  sh.setFrozenRows(hdrRow);
+
+  // ---- Formula QUERY — selalu live, urutan Open→Menunggu→Close via ORDER BY DESC ----
+  // "Open" > "Menunggu Verifikasi" > "Close" secara abjad DESC → urutan yang kita mau ✓
+  var dataRow = hdrRow + 1;
+  var q = 'SELECT ' + selectCols + ' WHERE A IS NOT NULL ORDER BY ' + statusCol + ' DESC, ' + puCol + ', D';
+  var formula = '=IFERROR(QUERY(' + srcRange + ',"' + q + '",0),"Belum ada data.")';
+  sh.getRange(dataRow, 1).setFormula(formula);
+
+  // ---- Conditional formatting: warna seluruh baris berdasarkan kolom Status (col A) ----
+  var cfRows = 2000;
+  var rules = sh.getConditionalFormatRules();
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$A'+dataRow+'="Open"')
+    .setBackground('#FBEEEC').setFontColor(DASH_COLOR.red)
+    .setRanges([sh.getRange(dataRow,1,cfRows,nCols)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$A'+dataRow+'="Menunggu Verifikasi"')
+    .setBackground('#FEF9EC').setFontColor('#9A6B00')
+    .setRanges([sh.getRange(dataRow,1,cfRows,nCols)]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$A'+dataRow+'="Close"')
+    .setBackground('#EAF5EC').setFontColor(DASH_COLOR.mid)
+    .setRanges([sh.getRange(dataRow,1,cfRows,nCols)]).build());
+  sh.setConditionalFormatRules(rules);
+
+  // ---- Lebar kolom: auto-resize lalu cap kolom teks panjang ----
+  sh.autoResizeColumns(1, Math.min(nCols, 12));
   ['Deskripsi','Deskripsi Perbaikan','Catatan Verifikasi','Saran'].forEach(function(col){
     var ci = kolomList.indexOf(col);
-    if (ci >= 0) sh.setColumnWidth(ci+1, 220);
+    if (ci >= 0) {
+      sh.setColumnWidth(ci+1, 210);
+      sh.getRange(dataRow, ci+1, cfRows, 1).setWrap(true);
+    }
   });
+
+  Logger.log(tabName + ' (formula-based) dibuat. PU: [' + pus.join(', ') + ']');
 }
