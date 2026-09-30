@@ -2588,7 +2588,7 @@ async function tlKirim(){
   if(!ids.length){toast('Tidak ada draf untuk dikirim');return;}
   if(!confirm(`Kirim ${ids.length} temuan ke Google?`))return;
   const btn=$('#tl-kirim-btn');if(btn){btn.disabled=true;}
-  let ok=0,gagal=0;
+  let ok=0,gagal=0;const errLog=[];
   for(const id of ids){
     const d=TL_DRAFT[id];const isSafety=d._type==='safety';
     const fields={};for(const k in d){if(k!=='_type')fields[k]=d[k];}
@@ -2599,12 +2599,12 @@ async function tlKirim(){
         : {secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||''};
       const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body)});
       const out=await res.json();
-      if(out.ok){delete TL_DRAFT[id];_tlSaveDraft();ok++;}else{gagal++;}
-    }catch(e){gagal++;}
+      if(out.ok){delete TL_DRAFT[id];_tlSaveDraft();ok++;}else{gagal++;const msg=out.error||'unknown';errLog.push(id+': '+msg);console.error('tlKirim gagal id='+id,msg);}
+    }catch(e){gagal++;errLog.push(id+': '+e.message);console.error('tlKirim exception id='+id,e);}
     if(btn)btn.textContent=`⬆ Mengirim… (${ok}/${ids.length})`;
   }
   if(btn){btn.disabled=false;btn.textContent=`⬆ Kirim ke Google (${tlDirtyCount()})`;}
-  alert(`Selesai.\n\nBerhasil: ${ok}\nGagal: ${gagal}${gagal?'\n\nYang gagal tetap tersimpan sebagai draf, coba kirim lagi.':''}`);
+  alert(`Selesai.\n\nBerhasil: ${ok}\nGagal: ${gagal}${gagal?'\n\nError:\n'+errLog.join('\n')+'\n\nYang gagal tetap tersimpan sebagai draf.':''}`);
   loadTL();
 }
 
