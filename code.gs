@@ -1492,6 +1492,7 @@ var DASH_ASPEK = ['Ringkas', 'Rapi', 'Resik', 'Rawat', 'Rajin'];
 function _refreshRingkasanDashboard() {
   try { buatRingkasanNilai(); } catch (e) { Logger.log('Auto-refresh Ringkasan gagal: ' + e); }
   try { buatDashboard(); } catch (e) { Logger.log('Auto-refresh Dashboard gagal: ' + e); }
+  try { buatRingkasanTemuan(); } catch (e) { Logger.log('Auto-refresh Ringkasan Temuan gagal: ' + e); }
 }
 
 // Jalankan SEKALI (dari editor, pilih fungsi ini di dropdown) SEBELUM buatDashboard()
@@ -2267,4 +2268,167 @@ function cekID() {
   catch(e){ Logger.log('SHEET ERROR: ' + e); }
   try { Logger.log('Folder ditemukan: ' + DriveApp.getFolderById(FOLDER_ID).getName()); }
   catch(e){ Logger.log('FOLDER ERROR: ' + e); }
+}
+
+// ============================================================
+//  RINGKASAN TEMUAN — tab ringkas buat admin kelola TL langsung di Sheets
+// ============================================================
+// Menampilkan semua temuan dari tab Temuan & SafetyFindings dalam satu view
+// yang rapi: kolom foto DataURL dibuang, diurutkan Open → Menunggu Verifikasi
+// → Close, dengan conditional formatting traffic-light per Status.
+// Auto-refresh setiap ada sync assessment atau update temuan masuk.
+// Admin bisa edit Status, Penyebab, Deskripsi Perbaikan, dll langsung di tab ini
+// (TIDAK tersambung balik ke tab Temuan — perubahan perlu dilakukan di tab Temuan
+// yang asli atau lewat web app; tab ini murni VIEW yang selalu di-regenerate ulang).
+// Kalau mau jalankan manual: pilih "buatRingkasanTemuan" di dropdown editor, Run.
+var RT_KOLOM = [
+  'Status','PU','Lokasi','Area','Kategori','Deskripsi','Penyebab',
+  'Target','Deskripsi Perbaikan','Tgl Perbaikan','Dihubungi',
+  'Verifikator','Berulang','Tanggal Temuan','Update Terakhir',
+  'Catatan Verifikasi','Saran','Skor','Periode','Asesor','ID Temuan','Folder Foto'
+];
+var RT_SAFETY_KOLOM = [
+  'Status','PU','Lokasi','Kategori','Lokasi Titik','Deskripsi','Target Selesai',
+  'Deskripsi Perbaikan','Tgl Perbaikan','Dihubungi',
+  'Verifikator','Tanggal Temuan','Update Terakhir',
+  'Catatan Verifikasi','Periode','Tahun','Asesor','ID Safety','Folder Foto'
+];
+var RT_STATUS_ORDER = {'Open':0,'Menunggu Verifikasi':1,'Close':2};
+
+function buatRingkasanTemuan() {
+  var ss = _getSheet();
+
+  // ---- BAGIAN 1: TEMUAN 5R ----
+  _buatTabRingkasanTemuan(ss, 'Ringkasan Temuan', SHEET_TEMUAN, RT_KOLOM, 'Temuan 5R');
+
+  // ---- BAGIAN 2: SAFETY (K3) ----
+  _buatTabRingkasanTemuan(ss, 'Ringkasan Safety', SHEET_SAFETY, RT_SAFETY_KOLOM, 'Temuan Safety (K3)');
+
+  Logger.log('Ringkasan Temuan & Safety selesai dibuat/diperbarui.');
+  return 'OK';
+}
+
+function _buatTabRingkasanTemuan(ss, tabName, sourceTab, kolomList, sectionLabel) {
+  var shSrc = ss.getSheetByName(sourceTab);
+  if (!shSrc || shSrc.getLastRow() < 2) {
+    // Buat tab kosong biar tidak error
+    var shE = ss.getSheetByName(tabName);
+    if (!shE) shE = ss.insertSheet(tabName);
+    shE.clearContents();
+    shE.getRange(1,1).setValue('Belum ada data ' + sectionLabel + '.');
+    return;
+  }
+
+  // Baca data sumber
+  var srcVals = shSrc.getRange(1, 1, shSrc.getLastRow(), shSrc.getLastColumn()).getValues();
+  var head = srcVals[0];
+
+  // Petakan kolom yang diminta ke index di sheet sumber
+  var colIdx = kolomList.map(function(k){ return head.indexOf(k); });
+
+  // Ambil data baris (skip header), abaikan baris kosong (kolom A kosong)
+  var rows = [];
+  for (var r = 1; r < srcVals.length; r++) {
+    if (!srcVals[r][0]) continue;
+    var row = colIdx.map(function(i){ return i >= 0 ? srcVals[r][i] : ''; });
+    rows.push(row);
+  }
+
+  // Sort: Open → Menunggu Verifikasi → Close → sisanya
+  var iStatus = 0; // Status selalu kolom pertama di RT_KOLOM
+  rows.sort(function(a, b){
+    var oa = RT_STATUS_ORDER[a[iStatus]] != null ? RT_STATUS_ORDER[a[iStatus]] : 9;
+    var ob = RT_STATUS_ORDER[b[iStatus]] != null ? RT_STATUS_ORDER[b[iStatus]] : 9;
+    if (oa !== ob) return oa - ob;
+    // secondary sort: PU lalu Lokasi
+    var pa = String(a[1]||''), pb = String(b[1]||'');
+    if (pa !== pb) return pa.localeCompare(pb);
+    return String(a[2]||'').localeCompare(String(b[2]||''));
+  });
+
+  // Tulis ke tab tujuan
+  var sh = ss.getSheetByName(tabName);
+  if (sh) ss.deleteSheet(sh);
+  sh = ss.insertSheet(tabName);
+  sh.setTabColor(DASH_COLOR.mid);
+
+  // Header judul
+  var totalCols = kolomList.length;
+  sh.getRange(1, 1, 1, totalCols).merge()
+    .setValue(sectionLabel.toUpperCase() + ' — Ringkasan Tindak Lanjut')
+    .setBackground(DASH_COLOR.dark).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(13).setHorizontalAlignment('left')
+    .setVerticalAlignment('middle');
+  sh.setRowHeight(1, 28);
+
+  var tsStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone()||'GMT+7', 'dd MMM yyyy HH:mm');
+  sh.getRange(2, 1, 1, totalCols).merge()
+    .setValue('Diperbarui: ' + tsStr + '  ·  Total: ' + rows.length + ' temuan  ·  Open: ' +
+      rows.filter(function(r){return r[0]==='Open';}).length + '  ·  Menunggu: ' +
+      rows.filter(function(r){return r[0]==='Menunggu Verifikasi';}).length + '  ·  Close: ' +
+      rows.filter(function(r){return r[0]==='Close';}).length)
+    .setBackground(DASH_COLOR.bg).setFontColor(DASH_COLOR.muted).setFontSize(9).setFontStyle('italic');
+  sh.setRowHeight(2, 18);
+
+  // Header kolom
+  var headerRow = 3;
+  sh.getRange(headerRow, 1, 1, totalCols).setValues([kolomList])
+    .setBackground(DASH_COLOR.mid).setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
+  sh.setRowHeight(headerRow, 22);
+  sh.setFrozenRows(headerRow);
+
+  if (!rows.length) {
+    sh.getRange(headerRow+1, 1).setValue('Tidak ada data.');
+    return;
+  }
+
+  // Tulis data
+  var dataRange = sh.getRange(headerRow+1, 1, rows.length, totalCols);
+  dataRange.setValues(rows).setVerticalAlignment('top').setFontSize(10);
+  sh.getRange(headerRow+1, 1, rows.length, totalCols)
+    .setBorder(true, true, true, true, true, true, DASH_COLOR.line, SpreadsheetApp.BorderStyle.SOLID);
+
+  // Zebra striping + highlight per status
+  for (var i = 0; i < rows.length; i++) {
+    var rn = headerRow + 1 + i;
+    var st = rows[i][iStatus];
+    var bg;
+    if (st === 'Open')                bg = '#FBEEEC';
+    else if (st === 'Menunggu Verifikasi') bg = '#FEF9EC';
+    else if (st === 'Close')          bg = '#EAF5EC';
+    else                              bg = i % 2 === 0 ? '#ffffff' : DASH_COLOR.bg;
+    sh.getRange(rn, 1, 1, totalCols).setBackground(bg);
+  }
+
+  // Kolom Status: bold + warna teks
+  var statusRanges = {Open:[], 'Menunggu Verifikasi':[], Close:[]};
+  for (var i = 0; i < rows.length; i++) {
+    var st = rows[i][iStatus];
+    if (statusRanges[st]) statusRanges[st].push(sh.getRange(headerRow+1+i, 1));
+  }
+  if (statusRanges['Open'].length) {
+    statusRanges['Open'].forEach(function(r){r.setFontColor(DASH_COLOR.red).setFontWeight('bold');});
+  }
+  if (statusRanges['Menunggu Verifikasi'].length) {
+    statusRanges['Menunggu Verifikasi'].forEach(function(r){r.setFontColor('#9A6B00').setFontWeight('bold');});
+  }
+  if (statusRanges['Close'].length) {
+    statusRanges['Close'].forEach(function(r){r.setFontColor(DASH_COLOR.mid).setFontWeight('bold');});
+  }
+
+  // Wrap text kolom Deskripsi & Deskripsi Perbaikan supaya terbaca
+  var wrapCols = ['Deskripsi','Deskripsi Perbaikan','Catatan Verifikasi','Saran'];
+  wrapCols.forEach(function(col){
+    var ci = kolomList.indexOf(col);
+    if (ci >= 0) sh.getRange(headerRow+1, ci+1, rows.length, 1).setWrap(true);
+  });
+
+  sh.autoResizeColumns(1, totalCols);
+  // Batasi lebar kolom teks panjang biar tidak terlalu melebar
+  ['Deskripsi','Deskripsi Perbaikan','Catatan Verifikasi','Saran'].forEach(function(col){
+    var ci = kolomList.indexOf(col);
+    if (ci >= 0) sh.setColumnWidth(ci+1, 220);
+  });
 }
