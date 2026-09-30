@@ -538,12 +538,17 @@ window.addEventListener('beforeunload',function(e){
 function drawerResume(){closeDrawer();resumeDraft();}
 
 /* ---------- HOME ---------- */
-let homePU=null;
+let homePU=null,homeLoc=null,homePeriode=null,homeTahun=null,homeJenis=null;
 function renderHome(){
   const auth=getAuth();
   const pus=Object.keys(STORE.config.matrix);
   if(!homePU)homePU=pus[0];
   const locs=Object.keys(STORE.config.matrix[homePU]||{});
+  if(!homeLoc||!locs.includes(homeLoc))homeLoc=locs[0]||null;
+  const _curYear=new Date().getFullYear();
+  if(!homeTahun)homeTahun=_curYear;
+  if(!homeJenis)homeJenis='Resmi';
+  if(!homePeriode)homePeriode='End Year';
   const dft=loadDraft();
   const resumeHtml=dft?`<div class="card" style="border:2px solid var(--amber);background:#FFF8EA">
       <div style="font-weight:800;font-family:Archivo;margin-bottom:4px">Lanjutkan Penilaian yang Belum Selesai?</div>
@@ -615,26 +620,26 @@ function renderHome(){
       ${blokirMulai?`<div class="login-err" style="background:var(--red);margin-bottom:14px">Penilaian baru dikunci sampai formulir berhasil disinkronkan. Lihat peringatan di atas.</div>`:''}
       <div style="display:flex;gap:10px;${blokirMulai?'opacity:.4;pointer-events:none':''}">
         <label class="field" style="flex:1"><span class="lbl">Tahun</span>
-          <select class="input" id="h-tahun" onchange="updatePeriodeLabel(this.value)">${tahunOptions()}</select></label>
+          <select class="input" id="h-tahun" onchange="homeTahun=parseInt(this.value,10);updatePeriodeLabel(this.value)">${tahunOptions(homeTahun)}</select></label>
         <label class="field" style="flex:1"><span class="lbl">Jenis</span>
-          <select class="input" id="h-jenis">
-            <option value="Resmi">Asesmen Direktorat Operasi</option>
-            <option value="Internal">Internal</option>
+          <select class="input" id="h-jenis" onchange="homeJenis=this.value">
+            <option value="Resmi" ${homeJenis==='Resmi'?'selected':''}>Asesmen Direktorat Operasi</option>
+            <option value="Internal" ${homeJenis==='Internal'?'selected':''}>Internal</option>
           </select></label>
       </div>
       <div style="${blokirMulai?'opacity:.4;pointer-events:none':''}">
       <label class="field"><span class="lbl">Periode</span>
-        <select class="input" id="h-periode">
-          <option value="Mid Year" id="h-periode-mid">Mid Year ${new Date().getFullYear()}</option>
-          <option value="End Year" id="h-periode-end">End Year ${new Date().getFullYear()}</option>
+        <select class="input" id="h-periode" onchange="homePeriode=this.value">
+          <option value="Mid Year" id="h-periode-mid" ${homePeriode==='Mid Year'?'selected':''}>Mid Year ${homeTahun}</option>
+          <option value="End Year" id="h-periode-end" ${homePeriode==='End Year'?'selected':''}>End Year ${homeTahun}</option>
         </select></label>
       <label class="field"><span class="lbl">Production Unit</span>
         <select class="input" id="h-pu" onchange="homePU=this.value;renderHome()">
           ${pus.map(p=>`<option ${p===homePU?'selected':''}>${esc(p)}</option>`).join('')}
         </select></label>
       <label class="field"><span class="lbl">Lokasi / Area</span>
-        <select class="input" id="h-loc">
-          ${locs.map(l=>`<option>${esc(l)}</option>`).join('')}
+        <select class="input" id="h-loc" onchange="homeLoc=this.value">
+          ${locs.map(l=>`<option ${l===homeLoc?'selected':''}>${esc(l)}</option>`).join('')}
         </select></label>
       </div>
       <button class="btn btn-primary btn-block" onclick="startAssess()" ${blokirMulai?'disabled style="opacity:.4"':''}>Mulai →</button>
