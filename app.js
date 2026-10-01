@@ -959,7 +959,7 @@ function renderAssessBody(){
       <div class="finding-lbl" style="margin-top:10px">Foto Temuan / Not Good — ${asp} <span style="color:${fotoTemuanPerlu?'var(--red)':'var(--muted)'};font-weight:700">(${photosTemuan.length}/5${adaTidak?(fotoTemuanPerlu?' · wajib minimal 1':''):' · opsional'})</span></div>
       <div class="photo-row">
         ${photosTemuan.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhotoTemuan('${akey}',${i})">`).join('')}
-        ${photosTemuan.length<5?`<label class="photo-add" style="${fotoTemuanPerlu?'border-color:var(--red)':''}">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
+        ${photosTemuan.length<5?`<label class="photo-add" style="${fotoTemuanPerlu?'border-color:var(--red)':''}">+<input type="file" accept="image/*" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
       </div>
     </div>`;
     html+=`</div>`;
@@ -2210,7 +2210,7 @@ function editFinding(id){
     <label class="field"><span class="lbl">Kategori 5R</span><select class="input" id="ef-kat">${katOpts}</select></label>
     <label class="field"><span class="lbl">Deskripsi Temuan</span><textarea class="input" id="ef-desk" style="min-height:60px">${esc(x.deskripsi||'')}</textarea></label>
     <label class="field"><span class="lbl">Dokumentasi Foto Temuan</span>
-      <div class="photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="efRmPhoto('foto')">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('foto',this)"></label>`}</div>
+      <div class="photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="efRmPhoto('foto')">`:`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="efAddPhoto('foto',this)"></label>`}</div>
     </label>
     <div style="font-size:11px;font-weight:800;color:var(--amber);letter-spacing:.05em;margin:14px 0 8px">B · SARAN TINDAK LANJUT</div>
     <label class="field"><span class="lbl">Penyebab (Root Cause)</span><select class="input" id="ef-penyebab">${penyebabOpts}</select></label>
@@ -2230,7 +2230,7 @@ function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;inp.value='';op
   const row=document.querySelector(`#modal-root [onchange*="efAddPhoto('${field}'"]`)?.closest('.photo-row')
     || document.querySelector(`#modal-root [onclick="efRmPhoto('${field}')"]`)?.closest('.photo-row');
   if(row)row.innerHTML=`<img src="${url}" class="photo-thumb" onclick="efRmPhoto('${field}')">`;});});}
-function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
+function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
 function saveFinding(id,isNew){
   if(isLocked())return lockBlock();
   const desk=($('#ef-desk').value||'').trim();
@@ -2278,7 +2278,7 @@ function openSafetyFinding(id){
     <label class="field"><span class="lbl">Lokasi / Titik</span><input class="input" id="sf-lok" value="${esc(x.lokasi||'')}" placeholder="mis. Area Janitor, tangga blending"></label>
     <label class="field"><span class="lbl">Deskripsi Temuan <span style="color:var(--red)">*</span></span><textarea class="input" id="sf-desk" style="min-height:70px" placeholder="Jelaskan bahaya / kondisi tidak aman…">${esc(x.deskripsi||'')}</textarea></label>
     <label class="field"><span class="lbl">Foto <span style="color:var(--red)">*</span></span>
-      <div class="photo-row" id="sf-photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="sfRmPhoto()">`:`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="sfAddPhoto(this)"></label>`}</div>
+      <div class="photo-row" id="sf-photo-row">${x.foto?`<img src="${x.foto}" class="photo-thumb" onclick="sfRmPhoto()">`:`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="sfAddPhoto(this)"></label>`}</div>
     </label>
     <div style="display:flex;gap:10px;margin-top:8px">
       ${isNew?'':`<button class="btn btn-danger" onclick="delSafetyFinding('${x.id}')">Hapus</button>`}
@@ -2288,7 +2288,7 @@ function openSafetyFinding(id){
   </div></div>`;
 }
 function sfAddPhoto(inp){const f=inp.files[0];if(!f)return;inp.value='';openCropper(f,cropped=>{handlePhoto(cropped,url=>{window._sfPhoto=url;const row=$('#sf-photo-row');if(row)row.innerHTML=`<img src="${url}" class="photo-thumb" onclick="sfRmPhoto()">`;});});}
-function sfRmPhoto(){window._sfPhoto='';const row=$('#sf-photo-row');if(row)row.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="sfAddPhoto(this)"></label>`;}
+function sfRmPhoto(){window._sfPhoto='';const row=$('#sf-photo-row');if(row)row.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" style="display:none" onchange="sfAddPhoto(this)"></label>`;}
 function saveSafetyFinding(id,isNew){
   if(isLocked())return lockBlock();
   const d=DRAFT; d.safetyFindings=d.safetyFindings||[];
