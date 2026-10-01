@@ -1220,6 +1220,26 @@ function updateSyncProgress(pct){
   if(p)p.textContent=pct+'% terkirim';
 }
 function hideSyncProgress(){closeModal();}
+function _confirmSyncThenSend(id){
+  const rec=STORE.sessions.find(s=>s.id===id);if(!rec)return;
+  const nTemuan=(rec.findings||[]).length;
+  const nSafety=(rec.safetyFindings||[]).length;
+  const temuanInfo=nTemuan?`<b>${nTemuan} temuan 5R</b>`:'<span style="color:var(--muted)">tidak ada temuan 5R</span>';
+  const safetyInfo=nSafety?` dan <b>${nSafety} temuan safety</b>`:'';
+  $('#modal-root').innerHTML=`<div class="modal-bg"><div class="modal" style="text-align:center;max-width:360px">
+    <div style="font-size:32px;margin-bottom:8px">📋</div>
+    <div style="font-weight:800;font-family:Archivo;font-size:16px;margin-bottom:10px">Sebelum Mengirim</div>
+    <div style="font-size:13px;color:var(--text);margin-bottom:6px;text-align:left">Sesi ini memiliki ${temuanInfo}${safetyInfo}.</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:left">Pastikan sudah mereview <b>Kelola Temuan</b>:<br>
+    ✔ Deskripsi temuan sudah benar & lengkap<br>
+    ✔ Foto temuan sudah terlampir<br>
+    ✔ Saran tindak lanjut sudah diisi</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal();VIEW='findings';render()">Cek Temuan Dulu</button>
+      <button class="btn btn-primary" style="flex:1" onclick="closeModal();syncSession('${id}')">Kirim Sekarang</button>
+    </div>
+  </div></div>`;
+}
 async function syncSession(id){
   if(!SYNC_URL){alert('Alamat sinkronisasi (SYNC_URL) belum diatur.');return;}
   const rec=STORE.sessions.find(s=>s.id===id);
@@ -1341,7 +1361,7 @@ function renderReport(){
     ${d.markedDone||d.synced
       ?(d.synced
         ?`<button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai · Keluar</button>`
-        :`<button class="btn btn-primary" onclick="syncSession('${d.id}')" ${!SYNC_URL?'disabled style="opacity:.4"':''}>Kirim ke Google</button>`)
+        :`<button class="btn btn-primary" onclick="_confirmSyncThenSend('${d.id}')" ${!SYNC_URL?'disabled style="opacity:.4"':''}>Kirim ke Google</button>`)
       :`<button class="btn btn-primary" onclick="markReportDone('${d.id}')">Selesai</button>`}
   </div>`;
 }
