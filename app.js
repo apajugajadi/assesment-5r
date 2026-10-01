@@ -1112,13 +1112,11 @@ function generateFindings(draft){
       let yes=0;krit.forEach((_,i)=>{if(draft.answers[`${areaId}|${asp}|${i}`]==='ya')yes++;});
       const skor=aspectScore(yes);
       if(skor>3)return; // aspek skor ≤3 (di bawah target Silver) otomatis jadi temuan
-      // klausul yang BUKAN 'ya' (Tidak / belum dijawab) = yang perlu diperbaiki
-      const gagal=krit.filter((_,i)=>draft.answers[`${areaId}|${asp}|${i}`]!=='ya');
       out.push({
         id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
         area:area.name, areaId:area.id, kategori:asp, r5:R5MAP[asp],
         skor,
-        deskripsi:`[Nilai ${skor}] ${asp} belum terpenuhi: ${gagal.join('; ')}`,
+        deskripsi:'',
         foto:(draft.photosTemuan&&draft.photosTemuan[`${areaId}|${asp}`]&&draft.photosTemuan[`${areaId}|${asp}`][0])||'',
         saran:'', target:String(new Date().getFullYear()),
         fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
@@ -2215,13 +2213,15 @@ function efAddPhoto(field,inp){const f=inp.files[0];if(!f)return;inp.value='';op
 function efRmPhoto(field){window._efPhoto[field]='';const lbl=document.querySelector(`[onclick="efRmPhoto('${field}')"]`);if(lbl)lbl.parentNode.innerHTML=`<label class="photo-add">+<input type="file" accept="image/*" capture="environment" style="display:none" onchange="efAddPhoto('${field}',this)"></label>`;}
 function saveFinding(id,isNew){
   if(isLocked())return lockBlock();
+  const desk=($('#ef-desk').value||'').trim();
+  if(!desk){toastError('Deskripsi temuan wajib diisi');$('#ef-desk').focus();return;}
   const d=DRAFT;d.findings=d.findings||[];
   const kat=$('#ef-kat').value;
   const prev=id?d.findings.find(f=>f.id===id):null;
   const areaName=$('#ef-area').value;
   const areaObj=STORE.config.areaChecks.find(a=>a.name===areaName);
   const obj={id,area:areaName,areaId:areaObj?areaObj.id:((prev&&prev.areaId)||''),kategori:kat,r5:R5MAP[kat],
-    deskripsi:$('#ef-desk').value.trim(),foto:window._efPhoto.foto||'',
+    deskripsi:desk,foto:window._efPhoto.foto||'',
     penyebab:$('#ef-penyebab').value,
     saran:$('#ef-saran').value.trim(),
     // (P5) field tindak lanjut lanjutan dipertahankan dari nilai sebelumnya (dikelola admin di Cloud),
