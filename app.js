@@ -1116,7 +1116,7 @@ function generateFindings(draft){
         id:'f'+Date.now()+Math.random().toString(36).slice(2,6),
         area:area.name, areaId:area.id, kategori:asp, r5:R5MAP[asp],
         skor,
-        deskripsi:'',
+        deskripsi:(draft.notes&&draft.notes[`${areaId}|${asp}`])||'',
         foto:(draft.photosTemuan&&draft.photosTemuan[`${areaId}|${asp}`]&&draft.photosTemuan[`${areaId}|${asp}`][0])||'',
         saran:'', target:String(new Date().getFullYear()),
         fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
