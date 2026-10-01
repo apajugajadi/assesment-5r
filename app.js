@@ -1228,15 +1228,15 @@ function _confirmSyncThenSend(id){
   const safetyInfo=nSafety?` dan <b>${nSafety} temuan safety</b>`:'';
   $('#modal-root').innerHTML=`<div class="modal-bg"><div class="modal" style="text-align:center;max-width:360px">
     <div style="font-size:32px;margin-bottom:8px">📋</div>
-    <div style="font-weight:800;font-family:Archivo;font-size:16px;margin-bottom:10px">Sebelum Mengirim</div>
-    <div style="font-size:13px;color:var(--text);margin-bottom:6px;text-align:left">Sesi ini memiliki ${temuanInfo}${safetyInfo}.</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:left">Pastikan sudah mereview <b>Kelola Temuan</b>:<br>
-    ✔ Deskripsi temuan sudah benar & lengkap<br>
-    ✔ Foto temuan sudah terlampir<br>
-    ✔ Saran tindak lanjut sudah diisi</div>
+    <div style="font-weight:800;font-family:Archivo;font-size:16px;margin-bottom:10px">Konfirmasi Pengiriman Data</div>
+    <div style="font-size:13px;color:var(--text);margin-bottom:6px;text-align:left">Sesi penilaian ini tercatat ${temuanInfo}${safetyInfo}.</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:16px;text-align:left">Sebelum mengirim, pastikan Anda telah meninjau menu <b>Kelola Temuan</b> dan memverifikasi hal berikut:<br><br>
+    ✔ Deskripsi setiap temuan telah diisi dengan benar dan lengkap<br>
+    ✔ Foto temuan telah dilampirkan<br>
+    ✔ Saran tindak lanjut telah diisi</div>
     <div style="display:flex;gap:10px">
-      <button class="btn btn-ghost" style="flex:1" onclick="closeModal();VIEW='findings';render()">Cek Temuan Dulu</button>
-      <button class="btn btn-primary" style="flex:1" onclick="closeModal();syncSession('${id}')">Kirim Sekarang</button>
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal();VIEW='findings';render()">Tinjau Temuan</button>
+      <button class="btn btn-primary" style="flex:1" onclick="closeModal();syncSession('${id}')">Kirim Data</button>
     </div>
   </div></div>`;
 }
