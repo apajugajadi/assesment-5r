@@ -2097,6 +2097,21 @@ function pasangDropdownValidasi() {
   Logger.log('Dropdown validasi terpasang di Temuan dan SafetyFindings.');
 }
 
+// Hapus semua data validation dari sheet yang tidak seharusnya punya validasi
+// Jalankan SEKALI dari editor jika ada error "melanggar aturan validasi" saat submit
+function clearValidasiSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var targets = [SHEET_DATA, SHEET_DETAIL, 'Assessment', 'Detail'];
+  targets.forEach(function(name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var range = sh.getDataRange();
+    range.clearDataValidations();
+    Logger.log('Validasi dibersihkan dari: ' + name);
+  });
+  Logger.log('Selesai. Jalankan pasangDropdownValidasi() untuk pasang ulang validasi yang benar.');
+}
+
 // ---- generator PPT temuan close (jalankan dari editor kapan diperlukan) ----
 var PPT_FILTER_PERIODE = '';   // kosong = semua periode; isi mis. 'Mid Year 2025'
 
