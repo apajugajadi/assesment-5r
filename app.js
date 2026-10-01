@@ -999,6 +999,15 @@ function validateCurrentStep(){
   for(const asp of ASPECTS){
     const krit=area.aspects[asp];if(!krit||!krit.length)continue;
     const akey=`${areaId}|${asp}`;
+    // Semua klausul WAJIB dijawab (Ya atau Tidak)
+    for(let i=0;i<krit.length;i++){
+      const key=`${areaId}|${asp}|${i}`;
+      if(!d.answers[key]){
+        const btn=document.querySelector(`button[onclick="setAns('${key}','ya')"]`);
+        const el=btn?btn.closest('.crit'):null;
+        if(el)return el;
+      }
+    }
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const note=(d.notes[akey]||'').trim();
     const fotoTemuan=(d.photosTemuan&&d.photosTemuan[akey])||[];
@@ -1021,7 +1030,7 @@ function navArea(dir){
   if(dir>0){
     const bad=validateCurrentStep();
     if(bad){
-      toastError('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum lanjut');
+      toastError('⚠️ Semua klausul wajib dijawab (Ya/Tidak) dan temuan wajib dilengkapi sebelum lanjut');
       spotlightElement(bad);
       return;
     }
