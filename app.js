@@ -651,10 +651,10 @@ function renderHome(){
       ${STORE.sessions.slice().reverse().slice(0,8).map(s=>{
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
-          <div><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
+          <div style="flex:1"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
           <div class="st">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
-          <span class="chev">›</span></div>`;
+          <button class="btn btn-ghost btn-sm" style="color:var(--red);border-color:#E6B0AA;padding:2px 8px;font-size:11px;margin-left:6px" onclick="event.stopPropagation();deleteSession('${s.id}')">Hapus</button></div>`;
       }).join('')}
       <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">Hapus Data pada Perangkat Ini</button>
     </div>`:''}
@@ -781,6 +781,15 @@ function updatePeriodeLabel(tahun){
   const mid=$('#h-periode-mid'),end=$('#h-periode-end');
   if(mid)mid.textContent='Mid Year '+tahun;
   if(end)end.textContent='End Year '+tahun;
+}
+function deleteSession(id){
+  const s=STORE.sessions.find(x=>x.id===id);
+  if(!s)return;
+  const label=`${s.pu} — ${s.loc} (${s.periode||''} ${s.tahun||''})`.trim();
+  const warn=s.synced?'':`\n\n⚠️ Sesi ini BELUM terkirim ke Google. Data akan hilang permanen.`;
+  if(!confirm(`Hapus sesi penilaian berikut?\n\n${label}${warn}`))return;
+  STORE.sessions=STORE.sessions.filter(x=>x.id!==id);
+  saveStore();renderHome();toast('Sesi penilaian telah dihapus');
 }
 function clearMyData(){
   const unsynced=STORE.sessions.filter(s=>!s.synced).length;
