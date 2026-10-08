@@ -93,7 +93,7 @@ function gradeFor(score){
 }
 const ASPECTS=['Ringkas','Rapi','Resik','Rawat'];
 /* [P10] Label tampilan Jenis — value internal tetap 'Resmi'/'Internal' agar konsisten dengan data lama */
-function jenisLabel(j){return j==='Resmi'?'Asesmen Direktorat Operasi':(j||'');}
+function jenisLabel(j){return j==='Resmi'?'Asesmen Direktorat Operasi':j==='SafetyOnly'?'Safety Only (HSSE)':(j||'');}
 
 /* ---------- Scoring ----------
    Item biasa: per aspek 3 kriteria Ya/Tidak -> jumlah Ya: 3->4,2->3,1->2,0->1
@@ -625,6 +625,7 @@ function renderHome(){
           <select class="input" id="h-jenis" onchange="homeJenis=this.value">
             <option value="Resmi" ${homeJenis==='Resmi'?'selected':''}>Asesmen Direktorat Operasi</option>
             <option value="Internal" ${homeJenis==='Internal'?'selected':''}>Internal</option>
+            <option value="SafetyOnly" ${homeJenis==='SafetyOnly'?'selected':''}>Safety Only (HSSE)</option>
           </select></label>
       </div>
       <div style="${blokirMulai?'opacity:.4;pointer-events:none':''}">
@@ -821,16 +822,20 @@ function startAssess(){
     toast(`⛔ ${loc} (${pu}) ${periode} ${tahun} [${jenisLabel(jenis)}] sudah dinilai. Tidak boleh dobel.`);
     return;
   }
-  const areas=(STORE.config.matrix[pu]||{})[loc]||[];
+  const isSafetyOnly = jenis === 'SafetyOnly';
+  const areas = isSafetyOnly ? [] : (STORE.config.matrix[pu]||{})[loc]||[];
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
   DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,asesorUsername:getAuth().username||'',date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
     areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},safetyFindings:[],curArea:0};
-  VIEW='assess';render();
+  VIEW = isSafetyOnly ? 'findings' : 'assess';
+  render();
 }
 function openSession(id){
   const s=STORE.sessions.find(x=>x.id===id);if(!s)return;
-  DRAFT=JSON.parse(JSON.stringify(s));VIEW='report';render();
+  DRAFT=JSON.parse(JSON.stringify(s));
+  VIEW=s.synced?'report':(s.jenis==='SafetyOnly'?'findings':'report');
+  render();
 }
 function resumeDraft(){const d=loadDraft();if(!d){toastError('Konsep penilaian tidak ditemukan');renderHome();return;}DRAFT=d;VIEW='assess';render();}
 function discardDraft(){if(!confirm('Batalkan isian yang belum selesai? Tidak bisa dikembalikan.'))return;clearDraft();renderHome();toast('Konsep penilaian telah dibatalkan');}
@@ -1313,6 +1318,7 @@ function renderReport(){
   const d=DRAFT, rep=computeReport(d), g=rep.grade;
   d.safetyFindings=d.safetyFindings||[];
   const auth=getAuth();const isAdmin=auth&&auth.role==='admin';
+  const isSafetyOnly=d.jenis==='SafetyOnly';
   const lockBanner=d.locked?`<div class="card" style="background:#FEF9EC;border-color:#F5DFA0;display:flex;align-items:center;gap:12px">
     <span style="font-size:22px">🔒</span>
     <div style="flex:1"><div style="font-weight:800;font-size:14px">Sesi Terkunci</div>
@@ -1322,6 +1328,12 @@ function renderReport(){
   app().innerHTML=topbar('Hasil Penilaian',d.pu+' · '+d.loc)+`
   <div class="wrap">
     ${lockBanner}
+    ${isSafetyOnly?`
+    <div class="card" style="display:flex;align-items:center;gap:14px;background:var(--accent-light)">
+      <span style="font-size:28px">🦺</span>
+      <div><div style="font-weight:800;font-size:15px">Safety Only (HSSE)</div>
+      <div style="font-size:12px;color:var(--muted)">${esc(d.periode||'')}${d.tahun?' '+esc(d.tahun):''} · ${esc(d.loc)} · ${esc(d.date)} · ${esc(d.asesor)}</div></div>
+    </div>`:`
     <div class="predikat-hero" style="background:linear-gradient(135deg,${g.color},${shade(g.color,-18)})">
       <div class="score">${rep.avg?rep.avg.toFixed(2):'—'}</div>
       <div class="lbl">${esc(g.label)}</div>
@@ -1353,7 +1365,7 @@ function renderReport(){
         return head+body;
       }).join('')}
       </tbody></table>
-    </div>
+    </div>`}
     ${reportNotes(d)}
     ${findingsCard(d)}
     ${safetyCard(d)}
@@ -1366,7 +1378,7 @@ function renderReport(){
     </div>
   </div>
   <div class="botbar">
-    <button class="btn btn-ghost" onclick="VIEW='assess';render()">‹ Ubah</button>
+    <button class="btn btn-ghost" onclick="VIEW=isSafetyOnly?'findings':'assess';render()">‹ Ubah</button>
     ${d.markedDone||d.synced
       ?(d.synced
         ?`<button class="btn btn-primary" onclick="VIEW='home';DRAFT=null;render()">Selesai · Keluar</button>`
