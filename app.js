@@ -827,7 +827,7 @@ function startAssess(){
   // map area names -> ids
   const areaIds=areas.map(nm=>{const a=STORE.config.areaChecks.find(x=>x.name===nm);return a?a.id:null;}).filter(Boolean);
   DRAFT={id:'s'+Date.now(),pu,loc,periode,tahun,jenis,asesor:getAuth().name,asesorUsername:getAuth().username||'',date:new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
-    areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},safetyFindings:[],curArea:0};
+    areas:areaIds,answers:{},interviewVals:{},photos:{},photosTemuan:{},notes:{},penyebab:{},saran:{},safetyFindings:[],curArea:0};
   VIEW = isSafetyOnly ? 'findings' : 'assess';
   render();
 }
@@ -967,7 +967,14 @@ function renderAssessBody(){
     const notePenuh=(d.notes[akey]||'').trim().length>0;
     const notePerlu=adaTidak&&!notePenuh;
     const fotoTemuanPerlu=adaTidak&&photosTemuan.length<1;
-    html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${notePerlu||fotoTemuanPerlu?'border-color:var(--red)':''}">
+    d.penyebab=d.penyebab||{};d.saran=d.saran||{};
+    const penyebabVal=d.penyebab[akey]||'';
+    const saranVal=d.saran[akey]||'';
+    const penyebabPerlu=adaTidak&&!penyebabVal;
+    const saranPerlu=adaTidak&&!saranVal.trim();
+    const PENYEBAB_OPTS=['Faktor Manusia','Faktor Mesin/Peralatan','Faktor Material','Faktor Metode','Faktor Lingkungan','Lainnya'];
+    const anyPerlu=notePerlu||fotoTemuanPerlu||penyebabPerlu||saranPerlu;
+    html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${anyPerlu?'border-color:var(--red)':''}">
       <div class="finding-lbl">Keterangan Temuan — ${asp} ${adaTidak?`<span style="color:${notePerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib diisi — terdapat klausul "Tidak")</span>`:'<span style="color:var(--muted);font-weight:400">(opsional)</span>'}</div>
       <textarea class="note-input" style="${notePerlu?'border-color:var(--red)':''}" placeholder="Jelaskan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
       <div class="finding-lbl" style="margin-top:10px">Foto Temuan / Not Good — ${asp} <span style="color:${fotoTemuanPerlu?'var(--red)':'var(--muted)'};font-weight:700">(${photosTemuan.length}/5${adaTidak?(fotoTemuanPerlu?' · wajib minimal 1':''):' · opsional'})</span></div>
@@ -975,6 +982,15 @@ function renderAssessBody(){
         ${photosTemuan.map((p,i)=>`<img src="${p}" class="photo-thumb" onclick="rmPhotoTemuan('${akey}',${i})">`).join('')}
         ${photosTemuan.length<5?`<label class="photo-add" style="${fotoTemuanPerlu?'border-color:var(--red)':''}">+<input type="file" accept="image/*" style="display:none" onchange="addPhotoTemuan('${akey}',this)"></label>`:''}
       </div>
+      ${adaTidak?`
+      <div class="finding-lbl" style="margin-top:10px">Penyebab (Root Cause) <span style="color:${penyebabPerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib)</span></div>
+      <select class="note-input" style="${penyebabPerlu?'border-color:var(--red)':''}" onchange="d_setPenyebab('${akey}',this.value)">
+        <option value="">— Pilih penyebab —</option>
+        ${PENYEBAB_OPTS.map(o=>`<option value="${o}" ${penyebabVal===o?'selected':''}>${o}</option>`).join('')}
+      </select>
+      <div class="finding-lbl" style="margin-top:10px">Saran Tindak Lanjut <span style="color:${saranPerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib)</span></div>
+      <textarea class="note-input" style="${saranPerlu?'border-color:var(--red)':''}" placeholder="Tuliskan rencana tindak lanjut…" oninput="d_setSaran('${akey}',this.value)">${esc(saranVal)}</textarea>
+      `:''}
     </div>`;
     html+=`</div>`;
   });
@@ -995,10 +1011,26 @@ function setInterview(idx,n){if(isLocked())return lockBlock();DRAFT.interviewVal
 function d_setNote(areaId,v){
   if(isLocked())return;
   DRAFT.notes[areaId]=v;saveDraftLite();
-  // (P2) update indikator wajib secara live tanpa re-render penuh
-  const box=document.getElementById('temuan-'+areaId.replace(/[^\w]/g,'_'));
+  _updateFindingBorder(areaId);
+}
+function d_setPenyebab(areaId,v){
+  if(isLocked())return;
+  DRAFT.penyebab=DRAFT.penyebab||{};DRAFT.penyebab[areaId]=v;saveDraftLite();
+  _updateFindingBorder(areaId);
+}
+function d_setSaran(areaId,v){
+  if(isLocked())return;
+  DRAFT.saran=DRAFT.saran||{};DRAFT.saran[areaId]=v;saveDraftLite();
+  _updateFindingBorder(areaId);
+}
+function _updateFindingBorder(areaId){
+  const box=document.getElementById('temuan-'+areaId.replace(/[^\w]/g,'_'));if(!box)return;
+  const note=(DRAFT.notes[areaId]||'').trim();
   const fotoTemuan=(DRAFT.photosTemuan&&DRAFT.photosTemuan[areaId])||[];
-  if(box&&v.trim()){const ta=box.querySelector('textarea');if(ta)ta.style.borderColor='';if(fotoTemuan.length>=1)box.style.borderColor='';}
+  const penyebab=(DRAFT.penyebab&&DRAFT.penyebab[areaId])||'';
+  const saran=(DRAFT.saran&&DRAFT.saran[areaId]||'').trim();
+  const ok=note&&fotoTemuan.length>=1&&penyebab&&saran;
+  if(ok)box.style.borderColor='';
 }
 function updateSpine(){const p=draftProgress(DRAFT);const f=$('.spine .fill');if(f){f.style.width=p.pct+'%';const m=$('.spine .meta span');if(m)m.textContent=`${p.done}/${p.total} terisi`;}
   const ls=$('#live-score');if(ls){const lv=liveScore(DRAFT);const g=gradeFor(lv.avg);ls.style.color=g.color;ls.textContent=lv.avg?'Total '+lv.avg.toFixed(2)+' · '+g.label:'Total —';}}
@@ -1025,8 +1057,10 @@ function validateCurrentStep(){
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const note=(d.notes[akey]||'').trim();
     const fotoTemuan=(d.photosTemuan&&d.photosTemuan[akey])||[];
-    // Foto & keterangan temuan WAJIB hanya bila ada klausul "Tidak" pada aspek ini
-    if(adaTidak&&(!note||fotoTemuan.length<1)){
+    const penyebab=(d.penyebab&&d.penyebab[akey])||'';
+    const saran=(d.saran&&d.saran[akey]||'').trim();
+    // Foto, keterangan, penyebab, saran WAJIB bila ada klausul "Tidak"
+    if(adaTidak&&(!note||fotoTemuan.length<1||!penyebab||!saran)){
       const el=document.getElementById('temuan-'+akey.replace(/[^\w]/g,'_'));
       if(el)return el;
     }
@@ -1044,7 +1078,7 @@ function navArea(dir){
   if(dir>0){
     const bad=validateCurrentStep();
     if(bad){
-      toastError('⚠️ Semua klausul wajib dijawab (Ya/Tidak) dan temuan wajib dilengkapi sebelum lanjut');
+      toastError('⚠️ Semua klausul wajib dijawab dan temuan wajib dilengkapi (foto, keterangan, penyebab, saran) sebelum lanjut');
       spotlightElement(bad);
       return;
     }
@@ -1132,7 +1166,9 @@ function generateFindings(draft){
         skor,
         deskripsi:(draft.notes&&draft.notes[`${areaId}|${asp}`])||'',
         foto:(draft.photosTemuan&&draft.photosTemuan[`${areaId}|${asp}`]&&draft.photosTemuan[`${areaId}|${asp}`][0])||'',
-        saran:'', target:String(new Date().getFullYear()),
+        penyebab:(draft.penyebab&&draft.penyebab[`${areaId}|${asp}`])||'',
+        saran:(draft.saran&&draft.saran[`${areaId}|${asp}`])||'',
+        target:String(new Date().getFullYear()),
         fotoPerbaikan:'', deskPerbaikan:'', tglPerbaikan:'',
         status:'Open', verifikator:'', auto:true
       });
@@ -1143,7 +1179,7 @@ function generateFindings(draft){
 function finishAssess(){
   const bad=validateCurrentStep();
   if(bad){
-    toastError('⚠️ Lengkapi foto dan/atau keterangan temuan yang wajib diisi sebelum melihat hasil');
+    toastError('⚠️ Lengkapi temuan yang wajib diisi (foto, keterangan, penyebab, saran) sebelum melihat hasil');
     spotlightElement(bad);
     return;
   }
