@@ -2433,16 +2433,23 @@ function _pptFindingSlide(pptx,f){
 
   const key=(f.areaId||'')+'|'+(f.kategori||'');
   const beforePhotos=(DRAFT.photosTemuan&&DRAFT.photosTemuan[key]&&DRAFT.photosTemuan[key].length)?DRAFT.photosTemuan[key]:(f.foto?[f.foto]:[]);
-  const photos=beforePhotos.slice(0,2); // maks 2 before biar muat 1 slide
-  if(f.fotoPerbaikan)photos.push(f.fotoPerbaikan);
+  const photos=beforePhotos.slice(); // semua foto before (maks 5) — ditampilkan semua, bukan dipotong
+  if(f.fotoPerbaikan)photos.push(f.fotoPerbaikan); // after ikut masuk grid yang sama, bukan slot terpisah
   const n=photos.length;
   if(n){
-    const gap=0.1, picW=(9.6-gap*(n-1))/n;
+    // Grid dinamis: dikit foto = kotak gede (fit area penuh), banyak foto = kebagi rapi.
+    // Kolom dipilih per jumlah biar gak timpang (4 foto -> 2x2, bukan 3+1 yang pincang).
+    const COLS_BY_N={1:1,2:2,3:3,4:2,5:3,6:3};
+    const cols=COLS_BY_N[n]||3, rows=Math.ceil(n/cols);
+    const areaX=0.2, areaY=0.75, areaW=9.6, areaH=3.55, gap=0.08;
+    const cellW=(areaW-gap*(cols-1))/cols, cellH=(areaH-gap*(rows-1))/rows;
     photos.forEach((p,i)=>{
-      try{slide.addImage({data:p,x:0.2+i*(picW+gap),y:0.75,w:picW,h:2.7,sizing:{type:'contain',w:picW,h:2.7}});}catch(e){}
+      const col=i%cols, row=Math.floor(i/cols);
+      const x=areaX+col*(cellW+gap), y2=areaY+row*(cellH+gap);
+      try{slide.addImage({data:p,x,y:y2,w:cellW,h:cellH,sizing:{type:'contain',w:cellW,h:cellH}});}catch(e){}
     });
   }
-  let y=3.65;
+  let y=4.5;
   slide.addText([{text:'Deskripsi: ',options:{bold:true,color:'0B3D2E'}},{text:f.deskripsi||'—'}],{x:0.2,y,w:9.6,h:0.5,fontSize:11,valign:'top',fontFace:'Arial'});
   y+=0.55;
   if(f.penyebab){slide.addText([{text:'Penyebab: ',options:{bold:true,color:'B45309'}},{text:f.penyebab}],{x:0.2,y,w:9.6,h:0.4,fontSize:11,fontFace:'Arial'});y+=0.45;}
