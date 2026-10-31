@@ -2112,34 +2112,38 @@ function clearValidasiSheet() {
   Logger.log('Selesai. Jalankan pasangDropdownValidasi() untuk pasang ulang validasi yang benar.');
 }
 
-// ---- generator PPT temuan close (jalankan dari editor kapan diperlukan) ----
-var PPT_FILTER_PERIODE = '';   // kosong = semua periode; isi mis. 'Mid Year 2025'
+// ---- generator PPT temuan (jalankan dari editor kapan diperlukan) ----
+var PPT_FILTER_PERIODE = '';   // kosong = semua periode; isi mis. 'End Year 2026'
 
 function generatePPTTemuan() {
   var ss     = SpreadsheetApp.openById(SHEET_ID);
   var folder = DriveApp.getFolderById(FOLDER_ID);
   var tgl    = _fmtTgl(new Date());
-  var pres   = SlidesApp.create('Laporan Temuan Close — ' + tgl);
+  var pres   = SlidesApp.create('Laporan Temuan 5R & Safety — ' + tgl);
 
   // hapus slide kosong bawaan
   pres.getSlides().forEach(function(s){ s.remove(); });
 
   // ---- Cover ----
   var cover = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
-  cover.getBackground().setSolidFill('#1A3C5E');
-  var tb = cover.insertTextBox('Laporan Tindak Lanjut Temuan 5R & Safety\n' + tgl,
-    40, 200, 600, 120);
-  tb.getText().getTextStyle().setFontSize(24).setBold(true).setForegroundColor('#FFFFFF');
+  cover.getBackground().setSolidFill('#1F5C3A');
+  var tbCover = cover.insertTextBox(
+    'Laporan Tindak Lanjut Temuan\n5R & Safety\n\n' + tgl +
+    (PPT_FILTER_PERIODE ? '\nPeriode: ' + PPT_FILTER_PERIODE : ''),
+    80, 160, 560, 200);
+  var tsCover = tbCover.getText().getTextStyle();
+  tsCover.setFontSize(26).setBold(true).setForegroundColor('#FFFFFF');
+  tbCover.getText().getParagraphStyle()
+    .setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 
-  // ---- kumpul data ----
-  var data5R     = _bacaCloseRows(ss, 'Temuan');
-  var dataSafety = _bacaCloseRows(ss, 'SafetyFindings');
+  // ---- kumpul data — SEMUA status ----
+  var data5R     = _bacaRows(ss, 'Temuan');
+  var dataSafety = _bacaRows(ss, 'SafetyFindings');
 
   // ---- bagian 5R ----
   _bagianPPT(pres, 'Temuan 5R', data5R);
-
   // ---- bagian Safety ----
-  _bagianPPT(pres, 'Temuan Safety', dataSafety);
+  _bagianPPT(pres, 'Temuan Safety (K3)', dataSafety);
 
   // simpan ke folder Drive
   var file = DriveApp.getFileById(pres.getId());
@@ -2157,53 +2161,68 @@ function _fmtTgl(d) {
   return dd + '-' + mm + '-' + yy;
 }
 
-function _bacaCloseRows(ss, tabName) {
-  var sh   = ss.getSheetByName(tabName);
+// Baca semua baris (semua status), filter opsional by PPT_FILTER_PERIODE
+function _bacaRows(ss, tabName) {
+  var sh = ss.getSheetByName(tabName);
   if (!sh) return {};
   var vals = sh.getDataRange().getValues();
   if (vals.length < 2) return {};
   var head = vals[0];
 
-  var iStatus   = head.indexOf('Status');
-  var iPeriode  = head.indexOf('Periode');
-  var iPU       = head.indexOf('PU');
-  var iTemuan   = head.indexOf('Deskripsi');
-  var iKategori = head.indexOf('Kategori');
-  var iPenyebab = head.indexOf('Penyebab');
-  var iTindakan = head.indexOf('Deskripsi Perbaikan');
-  var iBefore   = head.indexOf('Foto Temuan (DataURL)');
-  var iAfter    = head.indexOf('Foto Perbaikan (DataURL)');
-  var iTarget   = head.indexOf('Target');
+  var iStatus    = head.indexOf('Status');
+  var iPeriode   = head.indexOf('Periode');
+  var iPU        = head.indexOf('PU');
+  var iLokasi    = head.indexOf('Lokasi');
+  var iArea      = head.indexOf('Area');
+  var iAsesor    = head.indexOf('Asesor');
+  var iTemuan    = head.indexOf('Deskripsi');
+  var iKategori  = head.indexOf('Kategori');
+  var iPenyebab  = head.indexOf('Penyebab');
+  var iSaran     = head.indexOf('Saran');
+  var iTindakan  = head.indexOf('Deskripsi Perbaikan');
+  var iTglPer    = head.indexOf('Tgl Perbaikan');
+  var iBefore    = head.indexOf('Foto Temuan (DataURL)');
+  var iAfter     = head.indexOf('Foto Perbaikan (DataURL)');
+  var iVerif     = head.indexOf('Verifikator');
+  var iCatatan   = head.indexOf('Catatan Verifikasi');
+  var iTglTemuan = head.indexOf('Tanggal Temuan');
 
   var byPU = {};
   for (var r = 1; r < vals.length; r++) {
     var row = vals[r];
-    if (row[iStatus] !== 'Close') continue;
+    if (!row[iStatus]) continue; // skip baris kosong
     if (PPT_FILTER_PERIODE && row[iPeriode] !== PPT_FILTER_PERIODE) continue;
     var pu = row[iPU] || '(PU tidak diketahui)';
     if (!byPU[pu]) byPU[pu] = [];
     byPU[pu].push({
-      temuan:   row[iTemuan]   || '',
-      kategori: row[iKategori] || '',
-      penyebab: row[iPenyebab] || '',
-      tindakan: row[iTindakan] || '',
-      before:   row[iBefore]   || '',
-      after:    row[iAfter]    || '',
-      target:   row[iTarget]   || ''
+      pu:        row[iPU]       || '',
+      lokasi:    iLokasi >= 0   ? (row[iLokasi]    || '') : '',
+      area:      iArea >= 0     ? (row[iArea]       || '') : '',
+      asesor:    iAsesor >= 0   ? (row[iAsesor]     || '') : '',
+      periode:   row[iPeriode]  || '',
+      status:    row[iStatus]   || '',
+      temuan:    row[iTemuan]   || '',
+      kategori:  row[iKategori] || '',
+      penyebab:  iPenyebab >= 0 ? (row[iPenyebab]  || '') : '',
+      saran:     iSaran >= 0    ? (row[iSaran]      || '') : '',
+      tindakan:  iTindakan >= 0 ? (row[iTindakan]   || '') : '',
+      tglPer:    iTglPer >= 0   ? (row[iTglPer]     || '') : '',
+      before:    iBefore >= 0   ? (row[iBefore]     || '') : '',
+      after:     iAfter >= 0    ? (row[iAfter]      || '') : '',
+      verif:     iVerif >= 0    ? (row[iVerif]      || '') : '',
+      catatan:   iCatatan >= 0  ? (row[iCatatan]    || '') : '',
+      tglTemuan: iTglTemuan >= 0? (row[iTglTemuan]  || '') : ''
     });
   }
   return byPU;
 }
 
 function _bagianPPT(pres, sectionTitle, byPU) {
-  // section header
-  _slideDivider(pres, sectionTitle, '#1A3C5E');
-
   var puList = Object.keys(byPU).sort();
+  if (!puList.length) return;
+  _slideDivider(pres, sectionTitle, '#1F5C3A');
   puList.forEach(function(pu) {
-    // divider per PU
-    _slideDivider(pres, pu, '#2E6DA4');
-
+    _slideDivider(pres, pu, '#2E7D52');
     byPU[pu].forEach(function(item) {
       _slideTemuan(pres, item);
     });
@@ -2213,71 +2232,164 @@ function _bagianPPT(pres, sectionTitle, byPU) {
 function _slideDivider(pres, label, bgColor) {
   var sl = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
   sl.getBackground().setSolidFill(bgColor);
-  var tb = sl.insertTextBox(label, 40, 220, 600, 80);
+  var tb = sl.insertTextBox(label, 40, 210, 640, 100);
   var ts = tb.getText().getTextStyle();
-  ts.setFontSize(28).setBold(true).setForegroundColor('#FFFFFF');
-  tb.getText().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  ts.setFontSize(30).setBold(true).setForegroundColor('#FFFFFF');
+  tb.getText().getParagraphStyle()
+    .setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 }
 
+// Layout slide (720 × 540 pt):
+// [0-36]   Header bar hijau — PU · Lokasi · Area · Kategori + status badge kanan
+// [38-56]  Info: Asesor | Periode | Tgl Temuan
+// [58-96]  Deskripsi temuan
+// [98-116] Penyebab
+// [118-146] Saran Tindak Lanjut
+// [150-340] Foto (Before 1 | Before 2 | After)
+// [345-430] TTD — Verifikator | Tanggal | Catatan
 function _slideTemuan(pres, item) {
   var sl = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
   sl.getBackground().setSolidFill('#FFFFFF');
 
-  // judul temuan
-  var title = sl.insertTextBox(item.temuan || '(Temuan)', 20, 15, 680, 40);
-  title.getText().getTextStyle().setFontSize(14).setBold(true).setForegroundColor('#1A3C5E');
+  // ── Header bar ───────────────────────────────────────────────
+  var headerText = (item.pu || '') +
+    (item.lokasi   ? ' — ' + item.lokasi   : '') +
+    (item.area     ? ' | ' + item.area     : '') +
+    (item.kategori ? ' | ' + item.kategori : '');
+  var hdr = sl.insertTextBox(headerText, 0, 0, 590, 36);
+  hdr.getFill().setSolidFill('#1F5C3A');
+  hdr.getText().getTextStyle()
+    .setFontSize(11).setBold(true).setForegroundColor('#FFFFFF');
+  hdr.getText().getParagraphStyle()
+    .setParagraphAlignment(SlidesApp.ParagraphAlignment.LEFT);
+  hdr.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-  // info baris
-  var info = 'Kategori: ' + item.kategori + '   |   Penyebab: ' + item.penyebab +
-             '   |   Target: ' + item.target;
-  var tb2 = sl.insertTextBox(info, 20, 55, 680, 30);
-  tb2.getText().getTextStyle().setFontSize(10).setForegroundColor('#444444');
+  // Status badge (kanan header)
+  var statusColor = item.status === 'Close'   ? '#16A34A' :
+                    item.status === 'Menunggu Verifikasi' ? '#D97706' : '#DC2626';
+  var badge = sl.insertTextBox(item.status || 'Open', 592, 4, 124, 28);
+  badge.getFill().setSolidFill(statusColor);
+  badge.getText().getTextStyle()
+    .setFontSize(10).setBold(true).setForegroundColor('#FFFFFF');
+  badge.getText().getParagraphStyle()
+    .setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  badge.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-  // tindakan
-  if (item.tindakan) {
-    var tb3 = sl.insertTextBox('Tindakan: ' + item.tindakan, 20, 85, 680, 36);
-    tb3.getText().getTextStyle().setFontSize(10).setForegroundColor('#222222');
+  // ── Info baris ───────────────────────────────────────────────
+  var tglTemuan = item.tglTemuan ? String(item.tglTemuan).slice(0, 10) : '';
+  var infoText = 'Asesor: ' + (item.asesor || '—') +
+    '   |   Periode: ' + (item.periode || '—') +
+    (tglTemuan ? '   |   Tgl Temuan: ' + tglTemuan : '');
+  var info = sl.insertTextBox(infoText, 8, 38, 704, 18);
+  info.getText().getTextStyle().setFontSize(9).setForegroundColor('#555555');
+
+  // ── Deskripsi temuan ─────────────────────────────────────────
+  var deskLabel = sl.insertTextBox('Temuan:', 8, 58, 704, 14);
+  deskLabel.getText().getTextStyle()
+    .setFontSize(9).setBold(true).setForegroundColor('#1F5C3A');
+  var desk = sl.insertTextBox(item.temuan || '—', 8, 72, 704, 26);
+  desk.getText().getTextStyle().setFontSize(10).setForegroundColor('#1A1A1A');
+
+  // ── Penyebab ─────────────────────────────────────────────────
+  var pLabel = sl.insertTextBox('Penyebab:', 8, 100, 150, 14);
+  pLabel.getText().getTextStyle()
+    .setFontSize(9).setBold(true).setForegroundColor('#B45309');
+  var pVal = sl.insertTextBox(item.penyebab || '—', 162, 100, 550, 14);
+  pVal.getText().getTextStyle().setFontSize(9).setForegroundColor('#444444');
+
+  // ── Saran TL ─────────────────────────────────────────────────
+  var sLabel = sl.insertTextBox('Saran Tindak Lanjut:', 8, 116, 160, 14);
+  sLabel.getText().getTextStyle()
+    .setFontSize(9).setBold(true).setForegroundColor('#1D4ED8');
+  var sVal = sl.insertTextBox(item.saran || item.tindakan || '—', 172, 116, 540, 26);
+  sVal.getText().getTextStyle().setFontSize(9).setForegroundColor('#444444');
+
+  // ── Garis pemisah ────────────────────────────────────────────
+  var line = sl.insertLine(
+    SlidesApp.LineCategory.STRAIGHT,
+    8, 145, 712, 145);
+  line.getLineFill().setSolidFill('#D1D5DB');
+
+  // ── Foto ─────────────────────────────────────────────────────
+  // Before 1 | Before 2 | After — masing2 fit dalam kotak 225×190
+  _sisipGambarMuat(sl, item.before, 8,   150, 225, 185, 'Before');
+  _sisipGambarMuat(sl, '',          238,  150, 225, 185, 'Before 2');  // placeholder (1 foto saja yg tersimpan)
+  _sisipGambarMuat(sl, item.after,  468,  150, 244, 185, 'After');
+
+  // ── TTD section ──────────────────────────────────────────────
+  // Verifikator box
+  var vBox = sl.insertTextBox(
+    'Verifikator\n\n' + (item.verif || '') + '\n\n\n\n_______________________\nTanda Tangan',
+    8, 340, 220, 130);
+  vBox.getFill().setSolidFill('#F9FAFB');
+  vBox.getText().getTextStyle().setFontSize(9).setForegroundColor('#374151');
+  vBox.getText().getRuns()[0].getTextStyle().setBold(true);
+
+  // Tanggal verifikasi box
+  var tBox = sl.insertTextBox(
+    'Tanggal Verifikasi\n\n\n\n_______________________',
+    238, 340, 220, 130);
+  tBox.getFill().setSolidFill('#F9FAFB');
+  tBox.getText().getTextStyle().setFontSize(9).setForegroundColor('#374151');
+  tBox.getText().getRuns()[0].getTextStyle().setBold(true);
+
+  // Catatan verifikasi / keterangan after
+  var cText = (item.catatan ? 'Catatan: ' + item.catatan : '') +
+              (item.tglPer  ? (item.catatan ? '\n' : '') + 'Tgl Selesai: ' + String(item.tglPer).slice(0,10) : '');
+  if (cText) {
+    var cBox = sl.insertTextBox(cText, 468, 340, 244, 130);
+    cBox.getFill().setSolidFill('#F0FDF4');
+    cBox.getText().getTextStyle().setFontSize(9).setForegroundColor('#374151');
   }
-
-  // foto before
-  _sisipGambarMuat(sl, item.before, 30,  130, 300, 200, 'Before');
-  // foto after
-  _sisipGambarMuat(sl, item.after,  370, 130, 300, 200, 'After');
 }
 
+// Sisipkan gambar dari dataURL, Drive ID, atau URL biasa
 function _sisipGambarMuat(slide, urlOrId, x, y, w, h, label) {
-  // label teks dulu
-  var lb = slide.insertTextBox(label, x, y - 18, w, 18);
-  lb.getText().getTextStyle().setFontSize(9).setBold(true).setForegroundColor('#555555');
+  var lb = slide.insertTextBox(label, x, y - 16, w, 16);
+  lb.getText().getTextStyle()
+    .setFontSize(8).setBold(true).setForegroundColor('#6B7280');
 
   if (!urlOrId) {
-    var ph = slide.insertTextBox('(Foto tidak tersedia)', x, y, w, h);
-    ph.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
-    ph.getTextRange().getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+    var ph = slide.insertTextBox('—', x, y, w, h);
+    ph.getFill().setSolidFill('#F3F4F6');
+    ph.getText().getTextStyle().setFontSize(9).setForegroundColor('#9CA3AF');
+    ph.getText().getParagraphStyle()
+      .setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+    ph.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
     return;
   }
 
   try {
-    // coba ambil dari Drive ID atau URL
-    var fileId = urlOrId;
-    var match  = urlOrId.match(/[-\w]{25,}/);
-    if (match) fileId = match[0];
-
-    var blob = DriveApp.getFileById(fileId).getBlob();
+    var blob;
+    if (urlOrId.indexOf('data:') === 0) {
+      // dataURL (base64) — langsung decode jadi Blob
+      var parts   = urlOrId.split(',');
+      var mime    = parts[0].match(/data:([^;]+)/)[1];
+      blob = Utilities.newBlob(Utilities.base64Decode(parts[1]), mime, 'foto.jpg');
+    } else {
+      // coba Drive ID atau URL
+      try {
+        var fileId = urlOrId;
+        var match  = urlOrId.match(/[-\w]{25,}/);
+        if (match) fileId = match[0];
+        blob = DriveApp.getFileById(fileId).getBlob();
+      } catch(eDrive) {
+        var resp = UrlFetchApp.fetch(urlOrId, {muteHttpExceptions: true});
+        if (resp.getResponseCode() === 200) {
+          blob = resp.getBlob();
+        } else {
+          throw new Error('HTTP ' + resp.getResponseCode());
+        }
+      }
+    }
     slide.insertImage(blob, x, y, w, h);
   } catch(e) {
-    try {
-      var resp = UrlFetchApp.fetch(urlOrId, {muteHttpExceptions: true});
-      if (resp.getResponseCode() === 200) {
-        slide.insertImage(resp.getBlob(), x, y, w, h);
-      } else {
-        var ph2 = slide.insertTextBox('(Foto gagal dimuat)', x, y, w, h);
-        ph2.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
-      }
-    } catch(e2) {
-      var ph3 = slide.insertTextBox('(Foto error)', x, y, w, h);
-      ph3.getText().getTextStyle().setFontSize(10).setForegroundColor('#AAAAAA');
-    }
+    var errPh = slide.insertTextBox('(Foto gagal dimuat)', x, y, w, h);
+    errPh.getFill().setSolidFill('#FEF2F2');
+    errPh.getText().getTextStyle().setFontSize(9).setForegroundColor('#EF4444');
+    errPh.getText().getParagraphStyle()
+      .setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+    errPh.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
   }
 }
 

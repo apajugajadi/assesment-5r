@@ -182,12 +182,37 @@ tr.tappable:active td{background:#F3F7F4}
 .drawer-item.danger{color:var(--red)}
 .drawer-foot{padding:14px 20px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);text-align:center}
 
+/* Ringkasan Temuan — presentasi cepat (foto besar, buat ditunjukin langsung pas closing meeting) */
+.present-card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
+.present-card .ph-head{display:flex;align-items:center;gap:8px;padding:12px 14px;flex-wrap:wrap}
+.present-card .ph-status{margin-left:auto;font-size:11px;font-weight:800;padding:3px 10px;border-radius:99px;color:#fff}
+.present-photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:3px;background:var(--line)}
+.present-photos img{width:100%;height:240px;object-fit:contain;display:block;background:#1a1a1a}
+.present-photos .ph-empty{width:100%;height:240px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;background:var(--concrete)}
+.present-photos .ph-cap{position:relative}
+.present-photos .ph-cap::after{content:attr(data-cap);position:absolute;left:0;bottom:0;background:rgba(11,32,27,.65);color:#fff;font-size:10px;font-weight:800;letter-spacing:.05em;padding:3px 8px}
+.present-body{padding:14px}
+.present-body .pb-row{font-size:13px;margin-bottom:8px}
+.present-body .pb-row:last-child{margin-bottom:0}
+.present-body .pb-lbl{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--muted);text-transform:uppercase;margin-bottom:2px}
+.present-toolbar{display:flex;gap:8px;position:sticky;top:0;z-index:40;background:var(--concrete);padding:10px 0;margin-bottom:4px}
+@media print{
+  body *{visibility:hidden}
+  .present-print,.present-print *{visibility:visible}
+  .present-print{position:absolute;left:0;top:0;width:100%}
+  .present-toolbar,.botbar,.topbar{display:none!important}
+  .present-card{box-shadow:none;border:1px solid #ccc;break-inside:avoid;page-break-inside:avoid;margin-bottom:10px}
+  .present-photos img,.present-photos .ph-empty{height:220px}
+}
+
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="modal-root"></div>
 <script src="seed_data.js"></script>
+<!-- PptxGenJS dimuat lazy (hanya saat tombol "Unduh PPT" dipencet) lewat _loadScriptOnce() di app.js,
+     bukan di sini — supaya app tetap ringan & offline-first saat baru dibuka. -->
 <script src="logos.js"></script>
 <script src="app.js"></script>
 </body>

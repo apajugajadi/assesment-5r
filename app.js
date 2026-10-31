@@ -382,6 +382,7 @@ function render(){
   if(VIEW==='assess'&&DRAFT){renderAssess();return;}
   if(VIEW==='report'&&DRAFT){renderReport();return;}
   if(VIEW==='findings'&&DRAFT){renderFindings();return;}
+  if(VIEW==='present'&&DRAFT){renderPresent();return;}
   if(VIEW==='dashboard'){renderDashboard();return;}
   if(VIEW==='dashnilai'){renderDashNilai();return;}
   if(VIEW==='dashsafety'){renderDashSafety();return;}
@@ -1409,6 +1410,7 @@ function renderReport(){
       <h2>Ekspor Data</h2>
       <p class="hint">Simpan hasil penilaian untuk keperluan laporan atau kearsipan.</p>
       <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">Unduh sebagai CSV (Excel)</button>
+      ${(d.findings&&d.findings.length)||(d.safetyFindings&&d.safetyFindings.length)?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="VIEW='present';render()">📸 Ringkasan Temuan (Presentasi Cepat)</button>`:''}
       <button class="btn btn-ghost btn-block" onclick="window.print()">Cetak atau Simpan sebagai PDF</button>
       ${(d.markedDone&&!d.synced)?`<button class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--muted);font-size:12px" onclick="exitReportWithoutSync()">Keluar tanpa mengirim ke Google</button>`:''}
     </div>
@@ -2313,6 +2315,151 @@ function saveFinding(id,isNew){
 }
 function x_defaultTarget(){return String(new Date().getFullYear());}
 function delFinding(id){if(isLocked())return lockBlock();if(!confirm('Hapus temuan ini?'))return;DRAFT.findings=DRAFT.findings.filter(f=>f.id!==id);saveDraftSession();closeModal();renderFindings();toast('Temuan telah dihapus');}
+
+/* ---------- RINGKASAN TEMUAN (presentasi cepat di lokasi, sebelum laporan final) ----------
+   Dirender langsung dari DRAFT (foto sudah ada di memori/localStorage sejak difoto —
+   tidak menambah pemakaian storage sama sekali, cuma layout tampilan berbeda: foto besar,
+   fit buat ditunjukin ke pihak yang diaudit saat closing meeting, atau dicetak/disimpan PDF
+   dengan foto yang jelas terlihat (beda dari print tampilan Kelola Temuan yang thumbnail-nya kecil). */
+function renderPresent(){
+  const d=DRAFT;
+  const findings=d.findings||[];
+  const safety=d.safetyFindings||[];
+  const total=findings.length+safety.length;
+  app().innerHTML=topbar('Ringkasan Temuan','Presentasi Cepat · '+d.pu+' · '+d.loc)+`
+  <div class="wrap present-print">
+    <div class="present-toolbar" style="flex-direction:column;gap:8px">
+      <button class="btn btn-ghost btn-block" onclick="VIEW='report';render()">‹ Kembali ke Hasil</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" style="flex:1" onclick="window.print()">🖶 Simpan PDF</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-export-ppt" onclick="exportPresentPPT()">📊 Unduh PPT</button>
+      </div>
+    </div>
+    ${total===0?'<div class="empty"><div class="ic">✓</div>Belum ada temuan untuk ditampilkan.</div>':''}
+    ${findings.map(_presentFindingCard).join('')}
+    ${safety.map(_presentSafetyCard).join('')}
+  </div>
+  <div class="botbar"><button class="btn btn-ghost btn-block" onclick="VIEW='report';render()">‹ Kembali ke Hasil</button></div>`;
+}
+function _presentFindingCard(f){
+  const stColor=f.status==='Close'?'var(--green-400)':'var(--red)';
+  // Temuan otomatis cuma simpan 1 foto di f.foto (lihat generateFindings), padahal asesor
+  // bisa upload s/d 5 foto before per temuan — ambil semua dari DRAFT.photosTemuan biar
+  // halaman ini nampilin seluruh dokumentasi, bukan cuma foto pertama.
+  const key=(f.areaId||'')+'|'+(f.kategori||'');
+  const beforePhotos=(DRAFT.photosTemuan&&DRAFT.photosTemuan[key]&&DRAFT.photosTemuan[key].length)?DRAFT.photosTemuan[key]:(f.foto?[f.foto]:[]);
+  const cells=beforePhotos.map((p,i)=>`<div class="ph-cap" data-cap="${beforePhotos.length>1?'SEBELUM '+(i+1):'SEBELUM'}"><img src="${p}"></div>`);
+  if(f.fotoPerbaikan)cells.push(`<div class="ph-cap" data-cap="SESUDAH"><img src="${f.fotoPerbaikan}"></div>`);
+  const photosHtml=cells.length?`<div class="present-photos">${cells.join('')}</div>`:`<div class="present-photos"><div class="ph-empty">Tidak ada foto</div></div>`;
+  return `<div class="present-card">
+    <div class="ph-head">
+      <span class="tag5r t-${f.kategori}">${esc((f.kategori||'').toUpperCase())}</span>
+      <span style="font-weight:700;font-size:13px">${esc(f.area||'')}</span>
+      <span class="ph-status" style="background:${stColor}">${esc(f.status||'Open')}</span>
+    </div>
+    ${photosHtml}
+    <div class="present-body">
+      <div class="pb-row"><div class="pb-lbl">Deskripsi Temuan</div>${esc(f.deskripsi||'—')}</div>
+      ${f.penyebab?`<div class="pb-row"><div class="pb-lbl">Penyebab</div>${esc(f.penyebab)}</div>`:''}
+      ${f.saran?`<div class="pb-row"><div class="pb-lbl">Saran Tindak Lanjut</div>${esc(f.saran)}</div>`:''}
+    </div>
+  </div>`;
+}
+function _presentSafetyCard(s){
+  return `<div class="present-card">
+    <div class="ph-head">
+      <span class="tag5r" style="background:var(--red);color:#fff">SAFETY</span>
+      <span style="font-weight:700;font-size:13px">${esc(s.kategori||'')}</span>
+    </div>
+    <div class="present-photos">${s.foto?`<div class="ph-cap" data-cap="FOTO"><img src="${s.foto}"></div>`:'<div class="ph-empty">Tidak ada foto</div>'}</div>
+    <div class="present-body">
+      ${s.lokasi?`<div class="pb-row"><div class="pb-lbl">Lokasi</div>${esc(s.lokasi)}</div>`:''}
+      <div class="pb-row"><div class="pb-lbl">Deskripsi</div>${esc(s.deskripsi||'—')}</div>
+    </div>
+  </div>`;
+}
+
+/* ---------- Unduh Ringkasan Temuan sebagai .pptx (client-side, tanpa Google/OAuth) ----------
+   PptxGenJS dimuat lazy dari CDN hanya saat tombol dipencet (bukan saat app dibuka) supaya
+   app tetap ringan & offline-first. Sekali kebuka dengan internet, browser cache file-nya,
+   jadi dipakai lagi berikutnya walau offline. */
+const PPTXGENJS_CDN='https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+function _loadScriptOnce(src){
+  return new Promise((resolve,reject)=>{
+    if(window.PptxGenJS)return resolve();
+    const existing=document.querySelector(`script[src="${src}"]`);
+    if(existing){existing.addEventListener('load',()=>resolve());existing.addEventListener('error',()=>reject(new Error('load failed')));return;}
+    const s=document.createElement('script');
+    s.src=src;s.onload=()=>resolve();s.onerror=()=>reject(new Error('load failed'));
+    document.head.appendChild(s);
+  });
+}
+async function exportPresentPPT(){
+  const btn=$('#btn-export-ppt');
+  const orig=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Menyiapkan…';}
+  try{
+    await _loadScriptOnce(PPTXGENJS_CDN);
+    const d=DRAFT;
+    const pptx=new PptxGenJS();
+    pptx.layout='LAYOUT_4x3'; // 10 x 7.5 inci
+
+    const cover=pptx.addSlide();
+    cover.background={color:'0B3D2E'};
+    cover.addText('Ringkasan Temuan',{x:0.5,y:2.3,w:9,h:1,fontSize:30,bold:true,color:'FFFFFF',align:'center',fontFace:'Arial'});
+    cover.addText(`${d.pu||''} — ${d.loc||''}`,{x:0.5,y:3.3,w:9,h:0.6,fontSize:18,color:'FFFFFF',align:'center',fontFace:'Arial'});
+    cover.addText(`${d.periode||''} ${d.tahun||''} · ${d.date||''} · ${d.asesor||''}`,{x:0.5,y:4.0,w:9,h:0.5,fontSize:12,color:'D6DED8',align:'center',fontFace:'Arial'});
+
+    (d.findings||[]).forEach(f=>_pptFindingSlide(pptx,f));
+    (d.safetyFindings||[]).forEach(s=>_pptSafetySlide(pptx,s));
+
+    const fname=`Ringkasan_Temuan_${(d.pu||'').replace(/[^\w]+/g,'')}_${(d.loc||'').replace(/[^\w]+/g,'')}_${Date.now()}.pptx`;
+    await pptx.writeFile({fileName:fname});
+    toast('PPT berhasil diunduh');
+  }catch(e){
+    toastError('Gagal membuat PPT. Pastikan Anda terhubung internet (sekali saja untuk memuat library-nya).');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=orig;}
+  }
+}
+function _pptFindingSlide(pptx,f){
+  const slide=pptx.addSlide();
+  slide.background={color:'FFFFFF'};
+  slide.addShape(pptx.ShapeType.rect,{x:0,y:0,w:10,h:0.6,fill:{color:'0B3D2E'}});
+  slide.addText(`${f.area||''} · ${(f.kategori||'').toUpperCase()}`,{x:0.2,y:0,w:7.8,h:0.6,fontSize:14,bold:true,color:'FFFFFF',valign:'middle',fontFace:'Arial'});
+  const stColor=f.status==='Close'?'1E7A5A':f.status==='Menunggu Verifikasi'?'E8A317':'C0392B';
+  slide.addShape(pptx.ShapeType.roundRect,{x:8.1,y:0.12,w:1.7,h:0.36,fill:{color:stColor},rectRadius:0.06});
+  slide.addText(f.status||'Open',{x:8.1,y:0.12,w:1.7,h:0.36,fontSize:10,bold:true,color:'FFFFFF',align:'center',valign:'middle',fontFace:'Arial'});
+
+  const key=(f.areaId||'')+'|'+(f.kategori||'');
+  const beforePhotos=(DRAFT.photosTemuan&&DRAFT.photosTemuan[key]&&DRAFT.photosTemuan[key].length)?DRAFT.photosTemuan[key]:(f.foto?[f.foto]:[]);
+  const photos=beforePhotos.slice(0,2); // maks 2 before biar muat 1 slide
+  if(f.fotoPerbaikan)photos.push(f.fotoPerbaikan);
+  const n=photos.length;
+  if(n){
+    const gap=0.1, picW=(9.6-gap*(n-1))/n;
+    photos.forEach((p,i)=>{
+      try{slide.addImage({data:p,x:0.2+i*(picW+gap),y:0.75,w:picW,h:2.7,sizing:{type:'contain',w:picW,h:2.7}});}catch(e){}
+    });
+  }
+  let y=3.65;
+  slide.addText([{text:'Deskripsi: ',options:{bold:true,color:'0B3D2E'}},{text:f.deskripsi||'—'}],{x:0.2,y,w:9.6,h:0.5,fontSize:11,valign:'top',fontFace:'Arial'});
+  y+=0.55;
+  if(f.penyebab){slide.addText([{text:'Penyebab: ',options:{bold:true,color:'B45309'}},{text:f.penyebab}],{x:0.2,y,w:9.6,h:0.4,fontSize:11,fontFace:'Arial'});y+=0.45;}
+  if(f.saran){slide.addText([{text:'Saran Tindak Lanjut: ',options:{bold:true,color:'1D4ED8'}},{text:f.saran}],{x:0.2,y,w:9.6,h:0.6,fontSize:11,valign:'top',fontFace:'Arial'});}
+}
+function _pptSafetySlide(pptx,s){
+  const slide=pptx.addSlide();
+  slide.background={color:'FFFFFF'};
+  slide.addShape(pptx.ShapeType.rect,{x:0,y:0,w:10,h:0.6,fill:{color:'C0392B'}});
+  slide.addText(`SAFETY · ${s.kategori||''}`,{x:0.2,y:0,w:9.6,h:0.6,fontSize:14,bold:true,color:'FFFFFF',valign:'middle',fontFace:'Arial'});
+  if(s.foto){
+    try{slide.addImage({data:s.foto,x:0.2,y:0.8,w:9.6,h:3.3,sizing:{type:'contain',w:9.6,h:3.3}});}catch(e){}
+  }
+  let y=4.3;
+  if(s.lokasi){slide.addText([{text:'Lokasi: ',options:{bold:true,color:'0B3D2E'}},{text:s.lokasi}],{x:0.2,y,w:9.6,h:0.4,fontSize:11,fontFace:'Arial'});y+=0.45;}
+  slide.addText([{text:'Deskripsi: ',options:{bold:true,color:'0B3D2E'}},{text:s.deskripsi||'—'}],{x:0.2,y,w:9.6,h:0.6,fontSize:11,valign:'top',fontFace:'Arial'});
+}
 
 /* ============ TEMUAN SAFETY (K3) — bisa dicatat kapan saja selama assessment ============
    Terpisah dari temuan 5R. Disimpan di DRAFT.safetyFindings = [ {id, deskripsi,
