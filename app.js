@@ -1410,7 +1410,7 @@ function renderReport(){
       <h2>Ekspor Data</h2>
       <p class="hint">Simpan hasil penilaian untuk keperluan laporan atau kearsipan.</p>
       <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="exportCSV()">Unduh sebagai CSV (Excel)</button>
-      ${(d.findings&&d.findings.length)||(d.safetyFindings&&d.safetyFindings.length)?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="VIEW='present';render()">📸 Ringkasan Temuan (Presentasi Cepat)</button>`:''}
+      ${(d.findings&&d.findings.length)||(d.safetyFindings&&d.safetyFindings.length)?`<button class="btn btn-primary btn-block" style="margin-bottom:10px" onclick="VIEW='present';render()">Ringkasan Temuan</button>`:''}
       <button class="btn btn-ghost btn-block" onclick="window.print()">Cetak atau Simpan sebagai PDF</button>
       ${(d.markedDone&&!d.synced)?`<button class="btn btn-ghost btn-block" style="margin-top:10px;color:var(--muted);font-size:12px" onclick="exitReportWithoutSync()">Keluar tanpa mengirim ke Google</button>`:''}
     </div>
