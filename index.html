@@ -197,7 +197,7 @@ tr.tappable:active td{background:#F3F7F4}
 .present-body .pb-lbl{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--muted);text-transform:uppercase;margin-bottom:2px}
 .present-toolbar{display:flex;gap:8px;position:sticky;top:0;z-index:40;background:var(--concrete);padding:10px 0;margin-bottom:4px}
 @media print{
-  body *{visibility:hidden}
+  body:has(.present-print) *{visibility:hidden}
   .present-print,.present-print *{visibility:visible}
   .present-print{position:absolute;left:0;top:0;width:100%}
   .present-toolbar,.botbar,.topbar{display:none!important}
