@@ -375,7 +375,8 @@ function retrySyncConfig(){checkRemoteConfig();}
 function render(){
   const auth=getAuth();
   if(!auth){renderLogin();return;}
-  const _ap=app();if(_ap)_ap.style.maxWidth=''; // reset lebar (modul Tindak Lanjut desktop mengubahnya)
+  const _ap=app();if(_ap){_ap.style.maxWidth='';_ap.classList.toggle('kalibrasi-theme',!!(DRAFT&&DRAFT.isKalibrasi&&(VIEW==='assess'||VIEW==='report')));}
+  if(VIEW==='kalibrasi'){renderKalibrasiPicker();return;}
   if(VIEW==='panduan'){renderPanduan();return;}
   if(VIEW==='tindaklanjut'&&auth.role==='admin'){renderTindakLanjut();return;}
   if(VIEW==='admin'&&auth.role==='admin'){renderAdmin();return;}
@@ -653,7 +654,7 @@ function renderHome(){
       ${STORE.sessions.slice().reverse().slice(0,8).map(s=>{
         const g=gradeFor(s.avg);
         return `<div class="area-item" onclick="openSession('${s.id}')">
-          <div style="flex:1"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}</div>
+          <div style="flex:1"><div class="nm">${s.isKalibrasi?'<span style="background:#5B21B6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:99px;margin-right:6px">🎯 KALIBRASI</span>':''}${esc(s.pu)} — ${esc(s.loc)}</div>
           <div class="st">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)}</div></div>
           <span class="badge done" style="background:${g.color}">${s.avg?s.avg.toFixed(2):'—'}</span>
           <button class="btn btn-ghost btn-sm" style="color:var(--red);border-color:#E6B0AA;padding:2px 8px;font-size:11px;margin-left:6px" onclick="event.stopPropagation();deleteSession('${s.id}')">Hapus</button></div>`;
@@ -661,6 +662,7 @@ function renderHome(){
       <button class="btn btn-ghost btn-block btn-sm" style="margin-top:8px;color:var(--red);border-color:#E6B0AA" onclick="clearMyData()">Hapus Data pada Perangkat Ini</button>
     </div>`:''}
 
+    ${SYNC_URL?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px;border-color:#C4B5FD;color:#5B21B6" onclick="VIEW='kalibrasi';render()">🎯 Kalibrasi Hasil Penilaian</button>`:''}
     ${auth.role==='admin'?`<button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='admin';render()">⚙ Kelola Formulirulir & Butir Audit</button>`:''}
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='dashnilai';render()">Dashboard Nilai</button>
     <button class="btn btn-ghost btn-block" style="margin-bottom:10px" onclick="VIEW='dashsafety';render()">Dashboard Safety (K3)</button>
@@ -839,6 +841,120 @@ function openSession(id){
   render();
 }
 function resumeDraft(){const d=loadDraft();if(!d){toastError('Konsep penilaian tidak ditemukan');renderHome();return;}DRAFT=d;VIEW='assess';render();}
+
+/* ========================= KALIBRASI (tarik sesi lama, revisi Ya/Tidak, submit ulang) =========================
+   Mode ini HANYA menyentuh jawaban klausul (Ya/Tidak) + wawancara. Temuan & temuan safety SENGAJA
+   ditarik & dikirim balik APA ADANYA (tanpa diedit) — wajib, karena backend menghapus-tulis-ulang
+   baris Temuan per ID Sesi: kalau tidak dikirim balik, temuan lama akan hilang begitu resubmit. */
+let KALIB_FILTER={periode:'',pu:'',loc:'',asesor:''};
+let KALIB_LIST=null;
+async function renderKalibrasiPicker(){
+  const auth=getAuth();const isAdmin=auth&&auth.role==='admin';
+  app().innerHTML=topbar('Kalibrasi Hasil Penilaian','Muat sesi sebelumnya untuk direvisi, kemudian kirim ulang')+`
+  <div class="wrap">
+    <div class="note" style="background:#F3E8FF;border:1px solid #C4B5FD;color:#5B21B6;border-radius:10px;padding:10px 12px;font-size:12.5px;margin-bottom:14px">
+      ⚠️ Fitur ini digunakan khusus untuk merevisi jawaban klausul (Ya/Tidak) dan hasil wawancara, misalnya apabila terdapat sanggahan dari pihak yang diaudit. Temuan yang telah tercatat tidak akan diubah melalui fitur ini. Setelah dikirim ulang, data akan menggantikan hasil penilaian sebelumnya pada sesi yang sama.
+    </div>
+    ${isAdmin?`<div class="card">
+      <h2>Cari Sesi</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <select class="input" style="flex:1;min-width:120px" onchange="KALIB_FILTER.periode=this.value;renderKalibList()">
+          <option value="">Semua Periode</option><option value="Mid Year">Mid Year</option><option value="End Year">End Year</option>
+        </select>
+        <select class="input" style="flex:1;min-width:120px" id="kalib-pu-sel" onchange="KALIB_FILTER.pu=this.value;renderKalibList()"><option value="">Semua PU</option></select>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select class="input" style="flex:1;min-width:120px" id="kalib-loc-sel" onchange="KALIB_FILTER.loc=this.value;renderKalibList()"><option value="">Semua Lokasi</option></select>
+        <select class="input" style="flex:1;min-width:120px" id="kalib-asesor-sel" onchange="KALIB_FILTER.asesor=this.value;renderKalibList()"><option value="">Semua Asesor</option></select>
+      </div>
+    </div>`:`<p class="hint" style="margin-bottom:10px">Daftar berikut hanya menampilkan sesi penilaian yang Anda kerjakan.</p>`}
+    <div id="kalib-list"><div class="empty"><div class="ic">⏳</div>Memuat daftar sesi…</div></div>
+  </div>`;
+  if(!SYNC_URL){$('#kalib-list').innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  try{
+    const res=await fetch(SYNC_URL+'?action=list&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){$('#kalib-list').innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal: ${esc(out.error||'unknown')}</div>`;return;}
+    KALIB_LIST=out.assessments||[];
+    if(!isAdmin){
+      // asesor: cuma boleh liat & kalibrasi sesi miliknya sendiri (dicocokkan via username, bukan nama — lebih akurat)
+      KALIB_LIST=KALIB_LIST.filter(x=>x['Asesor Username']===auth.username);
+    }else{
+      const pus=[...new Set(KALIB_LIST.map(x=>x['PU']).filter(Boolean))];
+      const locs=[...new Set(KALIB_LIST.map(x=>x['Lokasi']).filter(Boolean))];
+      const asesors=[...new Set(KALIB_LIST.map(x=>x['Asesor']).filter(Boolean))];
+      $('#kalib-pu-sel').innerHTML='<option value="">Semua PU</option>'+pus.map(p=>`<option>${esc(p)}</option>`).join('');
+      $('#kalib-loc-sel').innerHTML='<option value="">Semua Lokasi</option>'+locs.map(l=>`<option>${esc(l)}</option>`).join('');
+      $('#kalib-asesor-sel').innerHTML='<option value="">Semua Asesor</option>'+asesors.map(a=>`<option>${esc(a)}</option>`).join('');
+    }
+    renderKalibList();
+  }catch(e){$('#kalib-list').innerHTML=`<div class="empty"><div class="ic">⚠️</div>Gagal mengambil data. Periksa sinyal.<br><button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="renderKalibrasiPicker()">Coba Lagi</button></div>`;}
+}
+function renderKalibList(){
+  const b=$('#kalib-list');if(!b||!KALIB_LIST)return;
+  const isAdmin=getAuth().role==='admin';
+  let rows=KALIB_LIST;
+  if(isAdmin){
+    if(KALIB_FILTER.periode)rows=rows.filter(x=>String(x['Periode']||'').indexOf(KALIB_FILTER.periode)===0);
+    if(KALIB_FILTER.pu)rows=rows.filter(x=>x['PU']===KALIB_FILTER.pu);
+    if(KALIB_FILTER.loc)rows=rows.filter(x=>x['Lokasi']===KALIB_FILTER.loc);
+    if(KALIB_FILTER.asesor)rows=rows.filter(x=>x['Asesor']===KALIB_FILTER.asesor);
+  }
+  if(!rows.length){b.innerHTML='<div class="empty"><div class="ic">📋</div>Tidak ada sesi yang cocok dengan filter.</div>';return;}
+  b.innerHTML=rows.slice().reverse().slice(0,40).map(x=>{
+    const g=gradeFor(Number(x['Nilai Akhir'])||0);
+    return `<div class="list-row"><div class="nm">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}
+      <div style="font-size:12px;color:var(--muted);font-weight:400">${esc(x['Periode']||'')} ${esc(x['Tahun']||'')} · ${esc(x['Asesor']||'')} · ${esc(x['Tanggal']||'')}</div></div>
+      <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${x['Nilai Akhir']?Number(x['Nilai Akhir']).toFixed(2):'—'}</span>
+      <button class="btn btn-primary btn-sm" style="margin-left:6px" onclick="tarikSesiKalibrasi('${esc(x['ID Sesi'])}')">Tarik</button></div>`;
+  }).join('');
+}
+async function tarikSesiKalibrasi(id){
+  if(!confirm('Muat sesi ini untuk dikalibrasi? Jawaban klausul (Ya/Tidak) akan ditampilkan pada formulir dan dapat direvisi. Temuan yang telah tercatat tidak akan diubah.'))return;
+  toast('Memuat data sesi…');
+  try{
+    const res=await fetch(SYNC_URL+'?action=sessionDetail&id='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET));
+    const out=await res.json();
+    if(!out.ok){toastError('Gagal memuat sesi: '+(out.error||'unknown'));return;}
+    const s=out.session||{};
+    const answers={};const areaIdsSet=new Set();const unmatched=[];
+    (out.detail||[]).forEach(row=>{
+      const areaTxt=norm2(row['Area']),aspekTxt=norm2(row['Aspek']),klausulTxt=norm2(row['Klausul']);
+      const jawabanTxt=norm2(row['Jawaban']);
+      const area=STORE.config.areaChecks.find(a=>norm2(a.name)===areaTxt);
+      if(!area){unmatched.push(row);return;}
+      const asp=ASPECTS.find(a=>norm2(a)===aspekTxt);
+      if(!asp||!area.aspects[asp]){unmatched.push(row);return;}
+      const idx=area.aspects[asp].findIndex(q=>norm2(q)===klausulTxt);
+      if(idx===-1){unmatched.push(row);return;}
+      let val=null;
+      if(jawabanTxt==='ya')val='ya';else if(jawabanTxt==='tidak')val='tidak';
+      if(!val)return;
+      answers[`${area.id}|${asp}|${idx}`]=val;
+      areaIdsSet.add(area.id);
+    });
+    const mapFinding=f=>({id:f['ID Temuan'],area:f['Area']||'',areaId:f['Area ID']||'',kategori:f['Kategori']||'',skor:f['Skor']||'',
+      deskripsi:f['Deskripsi']||'',penyebab:f['Penyebab']||'',saran:f['Saran']||'',target:f['Target']||'',
+      deskPerbaikan:f['Deskripsi Perbaikan']||'',tglPerbaikan:f['Tgl Perbaikan']||'',status:f['Status']||'Open',
+      verifikator:f['Verifikator']||'',foto:f['Foto Temuan (DataURL)']||'',fotoPerbaikan:f['Foto Perbaikan (DataURL)']||''});
+    const mapSafety=sf=>({id:sf['ID Safety'],kategori:sf['Kategori']||'',lokasi:sf['Lokasi Titik']||'',
+      deskripsi:sf['Deskripsi']||'',foto:sf['Foto Temuan (DataURL)']||'',tanggal:sf['Tanggal Temuan']||''});
+    DRAFT={
+      id:s['ID Sesi'], // WAJIB sama persis — supaya backend nimpa di tempat, bukan bikin baris baru
+      pu:s['PU']||'',loc:s['Lokasi']||'',periode:s['Periode']||'',tahun:s['Tahun']||new Date().getFullYear(),
+      jenis:s['Jenis']||'Resmi',asesor:s['Asesor']||getAuth().name,asesorUsername:s['Asesor Username']||getAuth().username||'',
+      date:s['Tanggal']||new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}),
+      areas:[...areaIdsSet],answers,interviewVals:{},photos:{},photosTemuan:{},notes:{},penyebab:{},saran:{},
+      findings:(out.findings||[]).map(mapFinding),safetyFindings:(out.safetyFindings||[]).map(mapSafety),
+      curArea:0,isKalibrasi:true,_nilaiAwal:s['Nilai Akhir']!=null&&s['Nilai Akhir']!==''?Number(s['Nilai Akhir']):null,
+      _unmatchedCount:unmatched.length
+    };
+    if(unmatched.length)toast(`⚠️ ${unmatched.length} klausul tidak dapat dicocokkan dengan formulir saat ini (kemungkinan teks klausul telah berubah) — data lainnya berhasil dimuat`);
+    else toast('✓ Sesi berhasil dimuat untuk kalibrasi');
+    VIEW='assess';render();
+  }catch(e){toastError('Gagal memuat sesi. Periksa sinyal. '+e.message);}
+}
+function norm2(s){return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' ');}
 function discardDraft(){if(!confirm('Batalkan isian yang belum selesai? Tidak bisa dikembalikan.'))return;clearDraft();renderHome();toast('Konsep penilaian telah dibatalkan');}
 
 /* ---------- ASSESS ---------- */
@@ -851,7 +967,8 @@ function renderAssess(){
   const step=d.curArea;
   const live=liveScore(d);
   const lg=gradeFor(live.avg);
-  app().innerHTML=topbar(d.loc,d.pu+' · '+(d.periode||'')+' · '+d.asesor)+`
+  app().innerHTML=topbar(d.loc,d.pu+' · '+(d.periode||'')+' · '+d.asesor)+
+   (d.isKalibrasi?`<div style="background:#5B21B6;color:#fff;text-align:center;padding:7px 10px;font-size:12px;font-weight:800;letter-spacing:.03em">🎯 MODE KALIBRASI — merevisi sesi penilaian sebelumnya, temuan tidak diubah</div>`:'')+`
    <div class="spine">
      <div class="bar"><div class="fill" style="width:${prog.pct}%"></div></div>
      <div class="meta">
@@ -975,6 +1092,12 @@ function renderAssessBody(){
     const saranPerlu=adaTidak&&!saranVal.trim();
     const PENYEBAB_OPTS=['Faktor Manusia','Faktor Mesin/Peralatan','Faktor Material','Faktor Metode','Faktor Lingkungan','Lainnya'];
     const anyPerlu=notePerlu||fotoTemuanPerlu||penyebabPerlu||saranPerlu;
+    if(d.isKalibrasi){
+      // mode kalibrasi: detail temuan (keterangan/foto/penyebab/saran) disembunyikan total —
+      // gak diurus di sini, biar gak kebawa kesan wajib diisi ulang
+      html+=`</div>`;
+      return;
+    }
     html+=`<div class="finding" id="temuan-${akey.replace(/[^\w]/g,'_')}" data-akey="${akey}" data-need="temuan" style="${anyPerlu?'border-color:var(--red)':''}">
       <div class="finding-lbl">Keterangan Temuan — ${asp} ${adaTidak?`<span style="color:${notePerlu?'var(--red)':'var(--muted)'};font-weight:700">(wajib diisi — terdapat klausul "Tidak")</span>`:'<span style="color:var(--muted);font-weight:400">(opsional)</span>'}</div>
       <textarea class="note-input" style="${notePerlu?'border-color:var(--red)':''}" placeholder="Jelaskan temuan ${asp.toLowerCase()}…" oninput="d_setNote('${akey}',this.value)">${esc(d.notes[akey]||'')}</textarea>
@@ -1055,6 +1178,7 @@ function validateCurrentStep(){
         if(el)return el;
       }
     }
+    if(d.isKalibrasi)continue; // mode kalibrasi: cuma revisi Ya/Tidak, detail temuan (foto/penyebab/saran) tidak wajib
     const adaTidak=krit.some((_,i)=>d.answers[`${areaId}|${asp}|${i}`]==='tidak');
     const note=(d.notes[akey]||'').trim();
     const fotoTemuan=(d.photosTemuan&&d.photosTemuan[akey])||[];
@@ -1362,8 +1486,14 @@ function renderReport(){
     <div style="font-size:12px;color:var(--muted)">Telah dikirim ke Google${d.syncCount?` (${d.syncCount}×)`:''}${d.syncedAt?' · '+new Date(d.syncedAt).toLocaleString('id-ID'):''}. Perubahan dinonaktifkan.</div></div>
     ${isAdmin?`<button class="btn btn-sm btn-amber" onclick="unlockSession()">Buka Kunci</button>`:''}
   </div>`:'';
+  const kalibBanner=d.isKalibrasi?`<div class="card" style="background:#F3E8FF;border-color:#C4B5FD">
+    <div style="font-weight:800;font-size:14px;color:#5B21B6">🎯 Hasil Kalibrasi</div>
+    <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${d._nilaiAwal!=null?`Nilai sebelumnya: <b>${d._nilaiAwal.toFixed(2)}</b> → Nilai baru: <b style="color:#5B21B6">${rep.avg?rep.avg.toFixed(2):'—'}</b>`:'Nilai baru: <b style="color:#5B21B6">'+(rep.avg?rep.avg.toFixed(2):'—')+'</b>'}</div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:4px">Temuan yang telah tercatat tidak diubah melalui mode ini. Pengiriman ulang akan menggantikan hasil penilaian sebelumnya pada sesi yang sama.</div>
+  </div>`:'';
   app().innerHTML=topbar('Hasil Penilaian',d.pu+' · '+d.loc)+`
   <div class="wrap">
+    ${kalibBanner}
     ${lockBanner}
     ${isSafetyOnly?`
     <div class="card" style="display:flex;align-items:center;gap:14px;background:var(--accent-light)">
@@ -2070,7 +2200,7 @@ function admSessions(){
   const syncBar=SYNC_URL?`<button class="btn btn-primary btn-block btn-sm" style="margin-bottom:12px" onclick="syncAllUnsynced()">Kirim Seluruh Data ke Google${pending?` (${pending} belum tersinkron)`:' ✓'}</button>`:'';
   return syncBar+STORE.sessions.slice().reverse().map(s=>{const g=gradeFor(s.avg);
     const sync=s.synced?'<span style="font-size:10px;color:var(--lime);font-weight:700">Tersinkron</span>':'<span style="font-size:10px;color:var(--amber);font-weight:700">Belum Tersinkron</span>';
-    return `<div class="list-row"><div class="nm">${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
+    return `<div class="list-row"><div class="nm">${s.isKalibrasi?'<span style="background:#5B21B6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:99px;margin-right:6px">🎯 KALIBRASI</span>':''}${esc(s.pu)} — ${esc(s.loc)}<div style="font-size:12px;color:var(--muted);font-weight:400">${esc(s.periode||"")}${s.tahun?' '+esc(s.tahun):''}${s.jenis?' · '+esc(jenisLabel(s.jenis)):''} · ${esc(s.date)} · ${esc(s.asesor)} · ${sync}</div></div>
       <span class="badge done" style="background:${g.color};color:#fff;font-family:Archivo;font-weight:800;padding:6px 11px;border-radius:9px">${s.avg?s.avg.toFixed(2):'—'}</span>
       ${SYNC_URL?`<button class="btn btn-ghost btn-sm" onclick="syncSession('${s.id}')">☁</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openSession('${s.id}')">Buka</button>
@@ -2193,6 +2323,20 @@ function findingsCard(d){
   const f=d.findings||[];
   const open=f.filter(x=>x.status==='Open').length, close=f.filter(x=>x.status==='Close').length;
   const pctClose=f.length?Math.round(close/f.length*100):0;
+  if(d.isKalibrasi){
+    return `<div class="card">
+      <h2>Temuan dan Tindak Lanjut</h2>
+      <p class="hint">${f.length} temuan tercatat pada sesi ini, ditampilkan tanpa perubahan. Temuan tidak diperbarui melalui mode kalibrasi.</p>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;text-align:center;padding:12px;background:#FBEEEC;border-radius:10px">
+          <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--red)">${open}</div>
+          <div style="font-size:11px;color:var(--muted);font-weight:700">TERBUKA</div></div>
+        <div style="flex:1;text-align:center;padding:12px;background:#EAF5EC;border-radius:10px">
+          <div style="font-family:Archivo;font-weight:800;font-size:22px;color:var(--green-400)">${close}</div>
+          <div style="font-size:11px;color:var(--muted);font-weight:700">SELESAI</div></div>
+      </div>
+    </div>`;
+  }
   return `<div class="card">
     <h2>Temuan dan Tindak Lanjut</h2>
     <p class="hint">${f.length} temuan, terbentuk otomatis dari aspek bernilai ≤3 (di bawah target). Dapat diubah, ditambah, atau dihapus.</p>

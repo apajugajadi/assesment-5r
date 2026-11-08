@@ -631,6 +631,24 @@ function doGet(e) {
     if (action === 'debugid') {
       return _json({ok:true, sheet_id:SHEET_ID, folder_id:FOLDER_ID});
     }
+    // (P-kalibrasi) Tarik 1 sesi utuh (ringkasan + detail klausul + temuan + safety APA ADANYA,
+    // termasuk foto) supaya bisa dimuat ulang ke form untuk direvisi, lalu disubmit ulang dengan
+    // ID Sesi yang SAMA. Temuan/safety WAJIB ikut ditarik & dikirim balik utuh walau tidak diedit —
+    // kalau tidak, resubmit akan menghapus temuan lama tanpa menggantinya (lihat _deleteTemuanRows).
+    if (action === 'sessionDetail') {
+      if (secret !== SHARED_SECRET) return _json({ok:false, error:'unauthorized'});
+      var sdId = (e.parameter.id || '');
+      if (!sdId) return _json({ok:false, error:'parameter id wajib diisi'});
+      var sdSession = _getSessionInfo(sdId);
+      if (!sdSession) return _json({ok:false, error:'Sesi dengan ID tersebut tidak ditemukan'});
+      return _json({
+        ok:true,
+        session:sdSession,
+        detail:_detailForSesi(sdId),
+        findings:_temuanForSesiUtuh(sdId),
+        safetyFindings:_safetyForSesiUtuh(sdId)
+      });
+    }
     return _json({ok:true, service:'Assesment 5R backend', time:new Date().toISOString()});
   } catch (err) {
     return _json({ok:false, error:String(err)});
@@ -645,6 +663,75 @@ function _listAssessments() {
   var head = vals[0];
   var out = [];
   for (var r = 1; r < vals.length; r++) {
+    var o = {};
+    for (var c = 0; c < head.length; c++) o[head[c]] = vals[r][c];
+    out.push(o);
+  }
+  return out;
+}
+
+// ---- (P-kalibrasi) Bantuan tarik 1 sesi utuh untuk direvisi ----
+function _getSessionInfo(sesiId) {
+  var ss = _getSheet();
+  var sh = ss.getSheetByName(SHEET_DATA);
+  if (!sh || sh.getLastRow() < 2) return null;
+  var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  var head = vals[0];
+  var iId = head.indexOf('ID Sesi');
+  for (var r = 1; r < vals.length; r++) {
+    if (vals[r][iId] === sesiId) {
+      var o = {};
+      for (var c = 0; c < head.length; c++) o[head[c]] = vals[r][c];
+      return o;
+    }
+  }
+  return null;
+}
+function _detailForSesi(sesiId) {
+  var ss = _getSheet();
+  var sh = ss.getSheetByName(SHEET_DETAIL);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  var head = vals[0];
+  var iId = head.indexOf('ID Sesi');
+  var out = [];
+  for (var r = 1; r < vals.length; r++) {
+    if (vals[r][iId] !== sesiId) continue;
+    var o = {};
+    for (var c = 0; c < head.length; c++) o[head[c]] = vals[r][c];
+    out.push(o);
+  }
+  return out;
+}
+// Versi UTUH (termasuk kolom foto) — khusus dipakai saat menarik 1 sesi untuk
+// dikirim balik apa adanya pada resubmit kalibrasi. BEDA dengan _listTemuan()/_listSafety()
+// yang sengaja membuang kolom foto demi performa listing admin (bukan untuk pass-through).
+function _temuanForSesiUtuh(sesiId) {
+  var ss = _getSheet();
+  var sh = ss.getSheetByName(SHEET_TEMUAN);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  var head = vals[0];
+  var iId = head.indexOf('ID Sesi');
+  var out = [];
+  for (var r = 1; r < vals.length; r++) {
+    if (vals[r][iId] !== sesiId) continue;
+    var o = {};
+    for (var c = 0; c < head.length; c++) o[head[c]] = vals[r][c];
+    out.push(o);
+  }
+  return out;
+}
+function _safetyForSesiUtuh(sesiId) {
+  var ss = _getSheet();
+  var sh = ss.getSheetByName(SHEET_SAFETY);
+  if (!sh || sh.getLastRow() < 2) return [];
+  var vals = sh.getRange(1, 1, sh.getLastRow(), sh.getLastColumn()).getValues();
+  var head = vals[0];
+  var iId = head.indexOf('ID Sesi');
+  var out = [];
+  for (var r = 1; r < vals.length; r++) {
+    if (vals[r][iId] !== sesiId) continue;
     var o = {};
     for (var c = 0; c < head.length; c++) o[head[c]] = vals[r][c];
     out.push(o);
