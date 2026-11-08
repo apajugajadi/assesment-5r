@@ -829,26 +829,60 @@ function _listTemuan() {
   return out;
 }
 
+// (P-foto-drive) Ekstrak Folder ID dari URL folder Drive sesi ("Folder Foto") agar bisa
+// discan langsung lewat DriveApp — dipakai sebagai fallback saat kolom DataURL kosong
+// (misal kelewat MAX_CELL_CHARS, atau foto ke-2/3/dst yang gak kebawa ke kolom DataURL).
+function _folderIdFromUrl(url) {
+  if (!url) return '';
+  var m = /\/folders\/([a-zA-Z0-9_-]+)/.exec(url);
+  return m ? m[1] : '';
+}
+// Cari semua file di folder Drive sesi yang namanya diawali prefix tertentu
+// (lihat penamaan file di _savePhotos: 'temuan__<ID>__...' / 'safety__<ID>...'),
+// lalu kembalikan sebagai dataURL siap-pakai. Gagal/folder tidak ada -> array kosong (aman).
+function _driveFotoFallback(folderUrl, prefix) {
+  var out = [];
+  var fid = _folderIdFromUrl(folderUrl);
+  if (!fid) return out;
+  try {
+    var folder = DriveApp.getFolderById(fid);
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      if (f.getName().indexOf(prefix) === 0) {
+        try {
+          var blob = f.getBlob();
+          out.push('data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()));
+        } catch (e2) {}
+      }
+    }
+  } catch (e) {}
+  return out;
+}
 // (P-perf) Ambil dataURL foto (before/after) untuk SATU temuan saja — dipanggil
 // on-demand saat admin membuka modal rincian temuan, bukan saat listing.
+// (P-foto-drive) Kalau kolom DataURL kosong tapi ada Folder Foto, coba cari foto
+// spesifik temuan ini langsung dari folder Drive sesi (bukan cuma kasih link folder).
 function _getFindingPhotos(findingId) {
   var ss = _getSheet();
   var sh = ss.getSheetByName(SHEET_TEMUAN);
-  if (!sh || sh.getLastRow() < 2) return {foto:'', fotoPerbaikan:''};
+  if (!sh || sh.getLastRow() < 2) return {foto:'', fotoPerbaikan:'', fotos:[], folderUrl:''};
   var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  var iId = head.indexOf('ID Temuan'), iFotoT = head.indexOf('Foto Temuan (DataURL)'), iFotoP = head.indexOf('Foto Perbaikan (DataURL)');
+  var iId = head.indexOf('ID Temuan'), iFotoT = head.indexOf('Foto Temuan (DataURL)'), iFotoP = head.indexOf('Foto Perbaikan (DataURL)'),
+      iFolder = head.indexOf('Folder Foto');
   var last = sh.getLastRow();
   var ids = sh.getRange(2, iId + 1, last - 1, 1).getValues();
   for (var r = 0; r < ids.length; r++) {
     if (ids[r][0] === findingId) {
       var rowNum = r + 2;
-      return {
-        foto: iFotoT > -1 ? (sh.getRange(rowNum, iFotoT + 1).getValue() || '') : '',
-        fotoPerbaikan: iFotoP > -1 ? (sh.getRange(rowNum, iFotoP + 1).getValue() || '') : ''
-      };
+      var foto = iFotoT > -1 ? (sh.getRange(rowNum, iFotoT + 1).getValue() || '') : '';
+      var fotoPerbaikan = iFotoP > -1 ? (sh.getRange(rowNum, iFotoP + 1).getValue() || '') : '';
+      var folderUrl = iFolder > -1 ? (sh.getRange(rowNum, iFolder + 1).getValue() || '') : '';
+      var fotos = foto ? [foto] : _driveFotoFallback(folderUrl, 'temuan__' + findingId + '__');
+      return {foto: fotos[0] || '', fotoPerbaikan: fotoPerbaikan, fotos: fotos, folderUrl: folderUrl};
     }
   }
-  return {foto:'', fotoPerbaikan:''};
+  return {foto:'', fotoPerbaikan:'', fotos:[], folderUrl:''};
 }
 
 // Memperbarui status temuan DAN mencatat perubahan ke tab RiwayatStatus (jejak audit — BARU)
@@ -1087,24 +1121,28 @@ function _listSafety() {
   }
   return out;
 }
+// (P-foto-drive) Sama seperti _getFindingPhotos — fallback ke folder Drive sesi kalau
+// kolom DataURL kosong.
 function _getSafetyPhotos(safetyId) {
   var ss = _getSheet();
   var sh = ss.getSheetByName(SHEET_SAFETY);
-  if (!sh || sh.getLastRow() < 2) return {foto:'', fotoPerbaikan:''};
+  if (!sh || sh.getLastRow() < 2) return {foto:'', fotoPerbaikan:'', fotos:[], folderUrl:''};
   var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  var iId = head.indexOf('ID Safety'), iFotoT = head.indexOf('Foto Temuan (DataURL)'), iFotoP = head.indexOf('Foto Perbaikan (DataURL)');
+  var iId = head.indexOf('ID Safety'), iFotoT = head.indexOf('Foto Temuan (DataURL)'), iFotoP = head.indexOf('Foto Perbaikan (DataURL)'),
+      iFolder = head.indexOf('Folder Foto');
   var last = sh.getLastRow();
   var ids = sh.getRange(2, iId + 1, last - 1, 1).getValues();
   for (var r = 0; r < ids.length; r++) {
     if (ids[r][0] === safetyId) {
       var rowNum = r + 2;
-      return {
-        foto: iFotoT > -1 ? (sh.getRange(rowNum, iFotoT + 1).getValue() || '') : '',
-        fotoPerbaikan: iFotoP > -1 ? (sh.getRange(rowNum, iFotoP + 1).getValue() || '') : ''
-      };
+      var foto = iFotoT > -1 ? (sh.getRange(rowNum, iFotoT + 1).getValue() || '') : '';
+      var fotoPerbaikan = iFotoP > -1 ? (sh.getRange(rowNum, iFotoP + 1).getValue() || '') : '';
+      var folderUrl = iFolder > -1 ? (sh.getRange(rowNum, iFolder + 1).getValue() || '') : '';
+      var fotos = foto ? [foto] : _driveFotoFallback(folderUrl, 'safety__' + safetyId);
+      return {foto: fotos[0] || '', fotoPerbaikan: fotoPerbaikan, fotos: fotos, folderUrl: folderUrl};
     }
   }
-  return {foto:'', fotoPerbaikan:''};
+  return {foto:'', fotoPerbaikan:'', fotos:[], folderUrl:''};
 }
 // Admin memperbarui tindak lanjut satu temuan safety. Perubahan Status dicatat ke
 // tab RiwayatStatus (jejak audit) sama seperti Temuan 5R.

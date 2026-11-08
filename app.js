@@ -722,7 +722,7 @@ function _panduanRole(role){
     langkah:[
       '<b>Kelola Formulir & Butir Audit</b> — atur area pemeriksaan, formulir per lokasi, foto standar, dan target nilai. Setelah mengubah, tekan "Sinkronkan Formulir ke Seluruh Asesor" agar perubahan diterima seluruh asesor.',
       '<b>Kelola Asesor</b> — daftarkan akun asesor baru, reset kata sandi, serta mengaktifkan atau menonaktifkan akun.',
-      '<b>Tindak Lanjut Temuan</b> — buka temuan (5R atau Safety) dari PU mana pun. Isi Penyebab/Target Penyelesaian (khusus 5R), Deskripsi Perbaikan, Tanggal, dan Foto After. Centang <b>Sudah Dihubungi</b> setelah menghubungi asesor via WhatsApp/telepon.',
+      '<b>Tindak Lanjut Temuan</b> — buka temuan (5R atau Safety) dari PU mana pun. Isi Penyebab/Target Penyelesaian (khusus 5R), Deskripsi Perbaikan, Tanggal, dan Foto After.',
       'Set status <b>Menunggu Verifikasi</b> sebagai penanda "sudah dikerjakan, tinggal tunggu balasan asesor". Begitu asesor konfirmasi sesuai (via WA), ubah manual jadi <b>Close</b>. Kalau belum sesuai, balikin ke <b>Open</b> dan catat alasannya.',
       '<b>Memantau</b> — Dashboard Nilai, Dashboard Safety (K3), dan Dashboard Analisis Temuan. Perhatikan penanda "temuan mandek lebih dari 7 hari".'
     ],
@@ -2688,7 +2688,7 @@ function _pptSafetySlide(pptx,s){
 async function _tlFetchPhotos(rows,isSafety){
   return Promise.all(rows.map(async x=>{
     const id=tlId(x);
-    if(!x['_adaFotoTemuan']&&!x['_adaFotoPerbaikan'])return Object.assign({},x,{_foto:'',_fotoP:''});
+    if(!x['_adaFotoTemuan']&&!x['_adaFotoPerbaikan']&&!x['Folder Foto'])return Object.assign({},x,{_foto:'',_fotoP:''});
     try{
       const url=isSafety
         ? SYNC_URL+'?action=safetyPhotos&safetyId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET)
@@ -2976,12 +2976,25 @@ function safetyMonRow(x){
     <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):''}</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Asesor: ${esc(x['Asesor']||'-')} · ${esc((x['Tanggal Temuan']||'').slice(0,10))}</div>
-    ${x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:''}
+    ${(x['_adaFotoTemuan']||x['Folder Foto'])?`<button class="btn btn-ghost btn-sm" style="margin-bottom:10px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:''}
     ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;margin-bottom:4px"><b>Tindak lanjut:</b> ${esc(x['Deskripsi Perbaikan'])}</div>`:''}
     ${x['Tgl Perbaikan']?`<div style="font-size:11px;color:var(--muted)">Selesai: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</div>`:''}
     ${x['Verifikator']?`<div style="font-size:11px;color:var(--muted)">Verifikator: ${esc(x['Verifikator'])}</div>`:''}
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
   </div>`;
+}
+// (P-foto-drive) Render daftar foto SEBELUM — bisa lebih dari 1 (hasil fallback folder Drive),
+// dan kalau server tetap tidak menemukan apa pun, kasih link folder Drive sebagai jalan terakhir.
+function _sebelumFotoHTML(out){
+  const list=(out.fotos&&out.fotos.length)?out.fotos:(out.foto?[out.foto]:[]);
+  if(!list.length){
+    return out.folderUrl
+      ? `<p class="hint">Foto temuan ini tidak ditemukan otomatis. <a href="${esc(out.folderUrl)}" target="_blank">Buka folder Drive sesi</a> untuk cek manual.</p>`
+      : '<p class="hint">Tidak ada foto temuan.</p>';
+  }
+  const label=list.length>1?`SEBELUM / TEMUAN (${list.length} foto)`:'SEBELUM / TEMUAN';
+  return `<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">${label}</div>`
+    +list.map(p=>`<img src="${p}" style="width:100%;border-radius:9px;margin-bottom:8px">`).join('');
 }
 async function viewFindingPhoto(id){
   toast('Mengambil foto…');
@@ -2991,7 +3004,7 @@ async function viewFindingPhoto(id){
     if(!out.ok){toastError('Gagal mengambil foto');return;}
     $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
       <h3>Foto Temuan</h3>
-      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SEBELUM / TEMUAN</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${_sebelumFotoHTML(out)}
       ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SESUDAH / PERBAIKAN</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:''}
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
@@ -3005,7 +3018,7 @@ async function viewSafetyPhoto(id){
     if(!out.ok){toastError('Gagal mengambil foto');return;}
     $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
       <h3>Foto Temuan Safety</h3>
-      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SEBELUM / TEMUAN</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${_sebelumFotoHTML(out)}
       ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SESUDAH / PERBAIKAN</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:''}
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
@@ -3159,12 +3172,14 @@ function tlFormHTML(x){
   const id=tlId(x), st=tlV(x,'Status')||'Open', isSafety=TL.tab==='safety';
   const catV=tlV(x,'Catatan Verifikasi');
   const tipe=isSafety?'safety':'temuan';
-  const dihubungi=tlV(x,'Dihubungi')==='Ya';
   const draftFoto=(TL_DRAFT[id]||{})['Foto Perbaikan (DataURL)'];
-  const fotoBtn=isSafety
-    ? (x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
-    : ((x['_adaFotoTemuan']||x['_adaFotoPerbaikan'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewFindingPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
-      +(x['Folder Foto']?`<a href="${esc(x['Folder Foto'])}" target="_blank" class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px">Buka Folder Foto di Drive</a>`:'');
+  // (P-foto-drive) Selalu coba tombol lihat-langsung dulu kalau ADA kemungkinan foto (dari kolom
+  // DataURL ataupun folder Drive sesi) — link folder Drive cuma muncul di dalam viewer sebagai
+  // jalan terakhir kalau server benar-benar tidak menemukan foto spesifik temuan ini.
+  const adaKemungkinanFoto=x['_adaFotoTemuan']||x['_adaFotoPerbaikan']||x['Folder Foto'];
+  const fotoBtn=adaKemungkinanFoto
+    ?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="${isSafety?'viewSafetyPhoto':'viewFindingPhoto'}('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`
+    :'';
   const statusOpts=`<option ${st==='Open'?'selected':''}>Open</option><option ${st==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option><option ${st==='Close'?'selected':''}>Close</option>`;
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -3179,10 +3194,6 @@ function tlFormHTML(x){
     </div>
     <div style="font-size:13px;background:#F7FAF8;border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">${esc(x['Deskripsi']||'(tanpa deskripsi)')}${x['Kategori']?` <span style="color:var(--muted)">[${esc(x['Kategori'])}]</span>`:''}</div>
     ${fotoBtn}
-    <label class="field" style="display:flex;align-items:center;gap:8px;background:${dihubungi?'#EAF5EC':'#FEF9EC'};border:1px solid ${dihubungi?'var(--green-400)':'#F5DFA0'};border-radius:9px;padding:9px 11px;margin-bottom:10px;cursor:pointer">
-      <input type="checkbox" ${dihubungi?'checked':''} onchange="tlDraftSet('${esc(id)}','${tipe}','Dihubungi',this.checked?'Ya':'');drawTLForm('${esc(id)}')" style="width:18px;height:18px">
-      <span style="font-size:12.5px;font-weight:700;color:${dihubungi?'var(--green)':'#9A6B00'}">${dihubungi?'✓ Asesor sudah dihubungi (WA/telepon)':'Tandai bila asesor sudah dihubungi (WA/telepon)'}</span>
-    </label>
     ${!isSafety?`<label class="field"><span class="lbl">Penyebab (Root Cause)</span>
       <select class="input" onchange="tlDraftSet('${esc(id)}','temuan','Penyebab',this.value==='— pilih —'?'':this.value)">${['','Kurang training','SOP tidak jelas','Alat/sarana rusak','Kelalaian operator','Lainnya'].map(p=>`<option ${p===tlV(x,'Penyebab')?'selected':''}>${p||'— pilih —'}</option>`).join('')}</select></label>
     <label class="field"><span class="lbl">Target Penyelesaian</span><input class="input" value="${esc(tlV(x,'Target'))}" oninput="tlDraftSet('${esc(id)}','temuan','Target',this.value)" placeholder="contoh: 2026"></label>`:''}
@@ -3561,7 +3572,7 @@ function openCloudFinding(id){
   const berulangBadge=t['Berulang']==='Ya'?`<span style="font-size:9px;font-weight:800;background:var(--amber);color:#fff;padding:2px 8px;border-radius:99px;margin-left:6px">TEMUAN BERULANG</span>`:'';
   // (P-perf) Listing utama TIDAK membawa dataURL foto (biar ringan) — hanya penanda
   // _adaFotoTemuan/_adaFotoPerbaikan. Isi foto sebenarnya di-fetch on-demand di bawah.
-  const adaFotoT=!!t['_adaFotoTemuan'], adaFotoP=!!t['_adaFotoPerbaikan'];
+  const adaFotoT=!!t['_adaFotoTemuan']||!!t['Folder Foto'], adaFotoP=!!t['_adaFotoPerbaikan'];
   const beforeAfter=(adaFotoT||adaFotoP)?`<div style="display:flex;gap:10px;margin-bottom:12px" id="cf-beforeafter">
     <div style="flex:1;text-align:center">
       <div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Before (Temuan)</div>
@@ -3768,7 +3779,7 @@ function mfRow(x){
     <div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${x['Area']?' · '+esc(x['Area']):(x['Lokasi Titik']?' · '+esc(x['Lokasi Titik']):'')}</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${esc(x['Deskripsi']||'')}</div>
     ${x['Deskripsi Perbaikan']?`<div style="font-size:12px;background:#F7FAF8;border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:6px"><b>Tindak lanjut Admin:</b> ${esc(x['Deskripsi Perbaikan'])}${x['Tgl Perbaikan']?`<br><span style="color:var(--muted)">Tgl: ${esc((x['Tgl Perbaikan']||'').slice(0,10))}</span>`:''}</div>`:''}
-    ${(x['_adaFotoTemuan']||x['_adaFotoPerbaikan'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewBeforeAfter('${esc(id)}',${isSafety})">Lihat Foto Before / After</button>`:''}
+    ${(x['_adaFotoTemuan']||x['_adaFotoPerbaikan']||x['Folder Foto'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewBeforeAfter('${esc(id)}',${isSafety})">Lihat Foto Before / After</button>`:''}
     ${st==='Menunggu Verifikasi'?`<div style="font-size:11px;color:var(--amber);font-weight:700">Admin menunggu konfirmasi Anda — Anda akan dihubungi langsung.</div>`:''}
     ${st==='Open'?`<div style="font-size:11px;color:var(--muted)">${x['Catatan Verifikasi']?'Dikembalikan — menunggu revisi.':'Belum ditindaklanjuti.'}</div>`:''}
     ${st==='Close'?`<div style="font-size:11px;color:var(--green-400)">Selesai & terverifikasi${x['Verifikator']?' oleh '+esc(x['Verifikator']):''}.</div>`:''}
@@ -3785,7 +3796,7 @@ async function viewBeforeAfter(id,isSafety){
     if(!out.ok){toastError('Gagal mengambil foto');return;}
     $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
       <h3>Foto Before / After</h3>
-      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">BEFORE (TEMUAN)</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${_sebelumFotoHTML(out)}
       ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">AFTER (PERBAIKAN)</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:'<p class="hint">Tim TL belum mengunggah foto perbaikan.</p>'}
       <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
     </div></div>`;
