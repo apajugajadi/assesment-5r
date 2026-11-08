@@ -611,8 +611,8 @@ function doGet(e) {
     // di server berdasarkan Asesor Username, bukan nama, supaya akurat walau ada nama sama.
     if (action === 'myFindings') {
       if (secret !== SHARED_SECRET) return _json({ok:false, error:'unauthorized'});
-      var muUsername = (e.parameter.username || '');
-      return _json({ok:true, findings:_listTemuan().filter(function(f){ return f['Asesor Username'] === muUsername; })});
+      var muUsername = (e.parameter.username || '').toLowerCase();
+      return _json({ok:true, findings:_listTemuan().filter(function(f){ return String(f['Asesor Username']||'').toLowerCase() === muUsername; })});
     }
     // (P-perf) Foto before/after untuk SATU temuan, diambil terpisah dari listing utama
     if (action === 'findingPhotos') {
@@ -954,8 +954,8 @@ function _updateMyFinding(findingId, username, fields) {
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     for (var r = 0; r < vals.length; r++) {
       if (vals[r][iId] === findingId) {
-        // ---- VALIDASI KEPEMILIKAN: baris ini harus milik username yang sedang login ----
-        if (vals[r][iUser] !== username) {
+        // ---- VALIDASI KEPEMILIKAN: baris ini harus milik username yang sedang login (case-insensitive) ----
+        if (String(vals[r][iUser]||'').toLowerCase() !== String(username||'').toLowerCase()) {
           return {ok:false, error:'Anda tidak berwenang mengubah temuan ini — bukan temuan yang Anda buat.'};
         }
         var rowNum = r + 2;
@@ -1170,7 +1170,7 @@ function _verifyGeneric(sheetName, idHeader, itemId, username, isAdmin, fields) 
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     for (var r = 0; r < vals.length; r++) {
       if (vals[r][iId] === itemId) {
-        if (!isAdmin && String(vals[r][iUser]) !== String(username)) {
+        if (!isAdmin && String(vals[r][iUser]||'').toLowerCase() !== String(username||'').toLowerCase()) {
           return {ok:false, error:'Anda bukan pembuat temuan ini — tidak berwenang memverifikasi.'};
         }
         var rowNum = r + 2;
@@ -1280,12 +1280,15 @@ function _loginUser(username, passwordHash) {
     var row = _findUserRow(sh, username);
     if (row < 0) return {ok:false, error:'Username tidak ditemukan'};
     var vals = sh.getRange(row, 1, 1, HEAD_USERS.length).getValues()[0];
+    var usernameAsli = vals[0]; // (P-fix-case) username PERSIS seperti tersimpan di Users — jangan echo input mentah,
+                                 // supaya 'Asesor Username' yang dicatat ke setiap sesi selalu konsisten hurufnya
+                                 // walau orangnya ketik beda kapitalisasi tiap login (mis. "Arif" vs "arif").
     var namaLengkap = vals[1], storedHash = vals[2], aktif = vals[3];
     var role = vals[7] || 'asesor'; // baris lama (sebelum kolom ini ada) dianggap 'asesor'
     var puDitugaskan = vals[8] || '';
     if (aktif !== 'Ya') return {ok:false, error:'Akun ini telah dinonaktifkan. Hubungi admin.'};
     if (storedHash !== passwordHash) return {ok:false, error:'Password salah'};
-    return {ok:true, username: username, namaLengkap: namaLengkap || username, role: role, puDitugaskan: puDitugaskan};
+    return {ok:true, username: usernameAsli, namaLengkap: namaLengkap || usernameAsli, role: role, puDitugaskan: puDitugaskan};
   } catch (e) { return {ok:false, error:String(e)}; }
 }
 // Admin mendaftarkan akun baru (asesor ATAU PIC Tindak Lanjut). Username harus unik.

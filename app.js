@@ -893,7 +893,9 @@ async function renderKalibrasiPicker(){
     KALIB_LIST=out.assessments||[];
     if(!isAdmin){
       // asesor: cuma boleh liat & kalibrasi sesi miliknya sendiri (dicocokkan via username, bukan nama — lebih akurat)
-      KALIB_LIST=KALIB_LIST.filter(x=>x['Asesor Username']===auth.username);
+      // dibandingkan tanpa peduli besar/kecil huruf — data lama bisa saja tersimpan beda kapitalisasi
+      // dari username akun saat ini (lihat juga perbaikan di _loginUser di code.gs)
+      KALIB_LIST=KALIB_LIST.filter(x=>String(x['Asesor Username']||'').toLowerCase()===String(auth.username||'').toLowerCase());
     }else{
       const pus=[...new Set(KALIB_LIST.map(x=>x['PU']).filter(Boolean))];
       const locs=[...new Set(KALIB_LIST.map(x=>x['Lokasi']).filter(Boolean))];
@@ -2981,6 +2983,20 @@ function safetyMonRow(x){
     <button class="btn btn-ghost btn-sm btn-block" style="margin-top:8px" onclick="lihatRiwayatStatus('${esc(id)}')">Riwayat Status</button>
   </div>`;
 }
+async function viewFindingPhoto(id){
+  toast('Mengambil foto…');
+  try{
+    const res=await fetch(SYNC_URL+'?action=findingPhotos&secret='+encodeURIComponent(SYNC_SECRET)+'&findingId='+encodeURIComponent(id));
+    const out=await res.json();
+    if(!out.ok){toastError('Gagal mengambil foto');return;}
+    $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+      <h3>Foto Temuan</h3>
+      ${out.foto?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SEBELUM / TEMUAN</div><img src="${out.foto}" style="width:100%;border-radius:9px;margin-bottom:12px">`:'<p class="hint">Tidak ada foto temuan.</p>'}
+      ${out.fotoPerbaikan?`<div style="font-size:11px;font-weight:800;color:var(--muted);margin-bottom:4px">SESUDAH / PERBAIKAN</div><img src="${out.fotoPerbaikan}" style="width:100%;border-radius:9px">`:''}
+      <button class="btn btn-ghost btn-block" style="margin-top:12px" onclick="closeModal()">Tutup</button>
+    </div></div>`;
+  }catch(e){toastError('Gagal mengambil foto');}
+}
 async function viewSafetyPhoto(id){
   toast('Mengambil foto…');
   try{
@@ -3147,7 +3163,8 @@ function tlFormHTML(x){
   const draftFoto=(TL_DRAFT[id]||{})['Foto Perbaikan (DataURL)'];
   const fotoBtn=isSafety
     ? (x['_adaFotoTemuan']?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewSafetyPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
-    : (x['Folder Foto']?`<a href="${esc(x['Folder Foto'])}" target="_blank" class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px">Buka Folder Foto di Drive</a>`:'');
+    : ((x['_adaFotoTemuan']||x['_adaFotoPerbaikan'])?`<button class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px" onclick="viewFindingPhoto('${esc(id)}')">Lihat Foto Temuan${x['_adaFotoPerbaikan']?' & Perbaikan':''}</button>`:'')
+      +(x['Folder Foto']?`<a href="${esc(x['Folder Foto'])}" target="_blank" class="btn btn-ghost btn-sm btn-block" style="margin-bottom:8px">Buka Folder Foto di Drive</a>`:'');
   const statusOpts=`<option ${st==='Open'?'selected':''}>Open</option><option ${st==='Menunggu Verifikasi'?'selected':''}>Menunggu Verifikasi</option><option ${st==='Close'?'selected':''}>Close</option>`;
   return `<div class="card">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
