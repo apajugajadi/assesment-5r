@@ -30,8 +30,11 @@ var SHEET_USERS   = 'Users';           // (P-uid) akun asesor: username + passwo
 // Header tab Users (BARU). Password TIDAK PERNAH disimpan plain text — selalu
 // dalam bentuk hash SHA-256 (lihat _hashPassword). 'Aktif' = 'Ya'/'Tidak' untuk
 // menonaktifkan akun tanpa harus menghapus barisnya (jejak tetap ada).
+// 'Role' (BARU) — 'asesor' (default, baris lama kosong dianggap asesor) atau
+// 'tindaklanjut' (PIC Tindak Lanjut, dikunci ke 1 PU lewat kolom 'PU Ditugaskan').
 var HEAD_USERS = [
-  'Username','Nama Lengkap','Password Hash','Aktif','Dibuat Oleh','Dibuat Pada','Direset Pada'
+  'Username','Nama Lengkap','Password Hash','Aktif','Dibuat Oleh','Dibuat Pada','Direset Pada',
+  'Role','PU Ditugaskan'
 ];
 
 // Header tab Assessment & Detail. Tahun dan Jenis diletakkan di akhir
@@ -112,12 +115,12 @@ function doPost(e) {
 
     // ---- mode: admin memperbarui beberapa kolom temuan ----
     if (body.type === 'updateFinding') {
-      return _json(_updateTemuanFields(body.findingId, body.fields, body.verifikator));
+      return _json(_updateTemuanFields(body.findingId, body.fields, body.verifikator, body.username));
     }
 
     // ---- mode: admin memperbarui tindak lanjut Temuan Safety (K3) ----
     if (body.type === 'updateSafetyFinding') {
-      return _json(_updateSafetyFields(body.safetyId, body.fields, body.verifikator));
+      return _json(_updateSafetyFields(body.safetyId, body.fields, body.verifikator, body.username));
     }
 
     // ---- mode: ASESOR pembuat (atau admin) memverifikasi temuan ----
@@ -179,7 +182,10 @@ function doPost(e) {
       return _json(_loginUser(body.username, body.passwordHash));
     }
     if (body.type === 'registerUser') {
-      return _json(_registerUser(body.username, body.namaLengkap, body.passwordHash, body.dibuatOleh));
+      return _json(_registerUser(body.username, body.namaLengkap, body.passwordHash, body.dibuatOleh, body.role, body.puDitugaskan));
+    }
+    if (body.type === 'setUserRole') {
+      return _json(_setUserRole(body.username, body.role, body.puDitugaskan));
     }
     if (body.type === 'resetPassword') {
       return _json(_resetUserPassword(body.username, body.passwordHash));
@@ -589,12 +595,12 @@ function doGet(e) {
     }
     if (action === 'findings') {
       if (secret !== SHARED_SECRET) return _json({ok:false, error:'unauthorized'});
-      return _json({ok:true, findings:_listTemuan()});
+      return _json({ok:true, findings:_filterByTLScope(_listTemuan(), e.parameter.username || '')});
     }
     // (Safety K3) Daftar seluruh temuan safety untuk Dashboard Safety admin
     if (action === 'safetyFindings') {
       if (secret !== SHARED_SECRET) return _json({ok:false, error:'unauthorized'});
-      return _json({ok:true, safety:_listSafety()});
+      return _json({ok:true, safety:_filterByTLScope(_listSafety(), e.parameter.username || '')});
     }
     // (Safety K3) Foto before/after untuk SATU temuan safety — diambil on-demand
     if (action === 'safetyPhotos') {
@@ -867,7 +873,7 @@ function _updateTemuanStatus(findingId, status, verifikator) {
     return {ok:false, error:'temuan tidak ditemukan'};
   } catch (e) { return {ok:false, error:String(e)}; }
 }
-function _updateTemuanFields(findingId, fields, verifikator) {
+function _updateTemuanFields(findingId, fields, verifikator, callerUsername) {
   try {
     var ss = _getSheet();
     var sh = ss.getSheetByName(SHEET_TEMUAN);
@@ -879,6 +885,8 @@ function _updateTemuanFields(findingId, fields, verifikator) {
     var vals = sh.getRange(2, 1, last-1, sh.getLastColumn()).getValues();
     for (var r = 0; r < vals.length; r++) {
       if (vals[r][0] === findingId) {
+        var scopeCheck = _cekScopeTL(callerUsername, iPU > -1 ? vals[r][iPU] : '');
+        if (!scopeCheck.ok) return scopeCheck;
         var rowNum = r + 2;
         var statusLama = iStatus > -1 ? vals[r][iStatus] : '';
         // jika field Status ikut diubah lewat updateFinding, catat juga ke riwayat
@@ -1101,18 +1109,20 @@ function _getSafetyPhotos(safetyId) {
 // Admin memperbarui tindak lanjut satu temuan safety. Perubahan Status dicatat ke
 // tab RiwayatStatus (jejak audit) sama seperti Temuan 5R.
 var SAFETY_ALLOWED_FIELDS = ['Status','Deskripsi Perbaikan','Tgl Perbaikan','Verifikator','Foto Perbaikan (DataURL)','Kategori','Lokasi Titik','Deskripsi','Catatan Verifikasi','Dihubungi'];
-function _updateSafetyFields(safetyId, fields, verifikator) {
+function _updateSafetyFields(safetyId, fields, verifikator, callerUsername) {
   try {
     if (!safetyId) return {ok:false, error:'safetyId kosong'};
     var ss = _getSheet();
     var sh = ss.getSheetByName(SHEET_SAFETY);
     if (!sh || sh.getLastRow() < 2) return {ok:false, error:'belum ada temuan safety'};
     var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-    var iId = head.indexOf('ID Safety'), iSesi = head.indexOf('ID Sesi'), iStatus = head.indexOf('Status');
+    var iId = head.indexOf('ID Safety'), iSesi = head.indexOf('ID Sesi'), iStatus = head.indexOf('Status'), iPU = head.indexOf('PU');
     var last = sh.getLastRow();
     var vals = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
     for (var r = 0; r < vals.length; r++) {
       if (vals[r][iId] === safetyId) {
+        var scopeCheck = _cekScopeTL(callerUsername, iPU > -1 ? vals[r][iPU] : '');
+        if (!scopeCheck.ok) return scopeCheck;
         var rowNum = r + 2;
         var statusLama = iStatus > -1 ? vals[r][iStatus] : '';
         if (fields && Object.prototype.hasOwnProperty.call(fields, 'Status') && iStatus > -1 && fields['Status'] !== statusLama) {
@@ -1219,6 +1229,40 @@ function _usersSheet() {
   var ss = _getSheet();
   return _tab(ss, SHEET_USERS, HEAD_USERS);
 }
+// (P-tl-pu) Cek apakah username boleh mengubah temuan milik PU tertentu.
+// Caller tanpa username (admin, pakai password bersama) ATAU akun berrole 'asesor'
+// selalu diizinkan (perilaku lama, tidak berubah). Hanya akun berrole 'tindaklanjut'
+// yang dibatasi — WAJIB PU target sama persis dengan PU Ditugaskan di akunnya.
+function _cekScopeTL(username, puTarget) {
+  if (!username) return {ok:true};
+  try {
+    var sh = _usersSheet();
+    var row = _findUserRow(sh, username);
+    if (row < 0) return {ok:true}; // username tidak dikenali -> jangan blokir (fail-open untuk kompatibilitas lama)
+    var vals = sh.getRange(row, 1, 1, HEAD_USERS.length).getValues()[0];
+    var role = vals[7] || 'asesor', puAkun = vals[8] || '';
+    if (role !== 'tindaklanjut') return {ok:true};
+    if (puAkun !== (puTarget || '')) {
+      return {ok:false, error:'Akun ini hanya berwenang menindaklanjuti temuan PU ' + puAkun + ', bukan ' + (puTarget || '(tidak diketahui)') + '.'};
+    }
+    return {ok:true};
+  } catch (e) { return {ok:true}; } // gagal cek -> jangan blokir permintaan yang sah
+}
+// (P-tl-pu) Filter daftar temuan/safety agar akun berrole 'tindaklanjut' cuma menerima
+// baris milik PU yang ditugaskan ke akunnya — bukan sekadar disembunyikan di tampilan.
+// Caller tanpa username, atau akun berrole bukan 'tindaklanjut', menerima seluruh baris (perilaku lama).
+function _filterByTLScope(rows, username) {
+  if (!username) return rows;
+  try {
+    var sh = _usersSheet();
+    var row = _findUserRow(sh, username);
+    if (row < 0) return rows;
+    var vals = sh.getRange(row, 1, 1, HEAD_USERS.length).getValues()[0];
+    var role = vals[7] || 'asesor', puAkun = vals[8] || '';
+    if (role !== 'tindaklanjut') return rows;
+    return rows.filter(function (x) { return x['PU'] === puAkun; });
+  } catch (e) { return rows; }
+}
 function _findUserRow(sh, username) {
   var last = sh.getLastRow();
   if (last < 2) return -1;
@@ -1237,19 +1281,36 @@ function _loginUser(username, passwordHash) {
     if (row < 0) return {ok:false, error:'Username tidak ditemukan'};
     var vals = sh.getRange(row, 1, 1, HEAD_USERS.length).getValues()[0];
     var namaLengkap = vals[1], storedHash = vals[2], aktif = vals[3];
+    var role = vals[7] || 'asesor'; // baris lama (sebelum kolom ini ada) dianggap 'asesor'
+    var puDitugaskan = vals[8] || '';
     if (aktif !== 'Ya') return {ok:false, error:'Akun ini telah dinonaktifkan. Hubungi admin.'};
     if (storedHash !== passwordHash) return {ok:false, error:'Password salah'};
-    return {ok:true, username: username, namaLengkap: namaLengkap || username};
+    return {ok:true, username: username, namaLengkap: namaLengkap || username, role: role, puDitugaskan: puDitugaskan};
   } catch (e) { return {ok:false, error:String(e)}; }
 }
-// Admin mendaftarkan akun asesor baru. Username harus unik (tidak boleh dobel).
-function _registerUser(username, namaLengkap, passwordHash, dibuatOleh) {
+// Admin mendaftarkan akun baru (asesor ATAU PIC Tindak Lanjut). Username harus unik.
+function _registerUser(username, namaLengkap, passwordHash, dibuatOleh, role, puDitugaskan) {
   try {
     if (!username || !passwordHash) return {ok:false, error:'username dan password wajib diisi'};
     var sh = _usersSheet();
     if (_findUserRow(sh, username) > -1) return {ok:false, error:'Username sudah terdaftar, gunakan username lain'};
-    sh.appendRow([username, namaLengkap || username, passwordHash, 'Ya', dibuatOleh || 'Admin', new Date().toISOString(), '']);
+    var r = (role === 'tindaklanjut') ? 'tindaklanjut' : 'asesor';
+    if (r === 'tindaklanjut' && !puDitugaskan) return {ok:false, error:'PU Ditugaskan wajib diisi untuk akun Tindak Lanjut'};
+    sh.appendRow([username, namaLengkap || username, passwordHash, 'Ya', dibuatOleh || 'Admin', new Date().toISOString(), '', r, r === 'tindaklanjut' ? puDitugaskan : '']);
     return {ok:true, username: username};
+  } catch (e) { return {ok:false, error:String(e)}; }
+}
+// Admin mengubah Role / PU Ditugaskan akun yang sudah ada (mis. promosikan asesor jadi PIC Tindak Lanjut).
+function _setUserRole(username, role, puDitugaskan) {
+  try {
+    var sh = _usersSheet();
+    var row = _findUserRow(sh, username);
+    if (row < 0) return {ok:false, error:'Username tidak ditemukan'};
+    var r = (role === 'tindaklanjut') ? 'tindaklanjut' : 'asesor';
+    if (r === 'tindaklanjut' && !puDitugaskan) return {ok:false, error:'PU Ditugaskan wajib diisi untuk akun Tindak Lanjut'};
+    sh.getRange(row, 8).setValue(r); // kolom Role
+    sh.getRange(row, 9).setValue(r === 'tindaklanjut' ? puDitugaskan : ''); // kolom PU Ditugaskan
+    return {ok:true, username: username, role: r, puDitugaskan: r === 'tindaklanjut' ? puDitugaskan : ''};
   } catch (e) { return {ok:false, error:String(e)}; }
 }
 // Admin mereset password akun asesor yang lupa password-nya.
@@ -1282,7 +1343,8 @@ function _listUsers() {
   if (last < 2) return [];
   var vals = sh.getRange(2, 1, last - 1, HEAD_USERS.length).getValues();
   return vals.map(function(r){
-    return {username: r[0], namaLengkap: r[1], aktif: r[3], dibuatOleh: r[4], dibuatPada: r[5], diresetPada: r[6]};
+    return {username: r[0], namaLengkap: r[1], aktif: r[3], dibuatOleh: r[4], dibuatPada: r[5], diresetPada: r[6],
+            role: r[7] || 'asesor', puDitugaskan: r[8] || ''};
   });
 }
 

@@ -77,6 +77,7 @@ function logout(){
 
 /* ---------- App state ---------- */
 let VIEW='home';          // home | assess | report | admin
+const FITUR_FOTO_ACUAN_AKTIF=false; // saklar tampilkan/sembunyikan galeri Foto Acuan/Standar saat assess (data galeri tetap aman, cuma disembunyikan)
 let DRAFT=null;           // current assessment in progress
 let ADMIN_TAB='area';     // area | items | matrix | sessions
 
@@ -375,6 +376,9 @@ function retrySyncConfig(){checkRemoteConfig();}
 function render(){
   const auth=getAuth();
   if(!auth){renderLogin();return;}
+  // (P-tl-uid) Akun PIC Tindak Lanjut dikunci total ke layar Tindak Lanjut — gak ada akses ke
+  // Beranda/menu admin lain, apapun VIEW yang ditarget.
+  if(auth.role==='tindaklanjut'){renderTindakLanjut();return;}
   const _ap=app();if(_ap){_ap.style.maxWidth='';_ap.classList.toggle('kalibrasi-theme',!!(DRAFT&&DRAFT.isKalibrasi&&(VIEW==='assess'||VIEW==='report')));}
   if(VIEW==='kalibrasi'){renderKalibrasiPicker();return;}
   if(VIEW==='panduan'){renderPanduan();return;}
@@ -401,10 +405,11 @@ function renderLogin(){
     <div class="tag">Audit Ringkas · Rapi · Resik · Rawat · Rajin — Direktorat Operasi</div>
     <div class="seg">
       <button class="${loginRole==='asesor'?'on':''}" onclick="loginRole='asesor';renderLogin()">Asesor</button>
+      <button class="${loginRole==='tindaklanjut'?'on':''}" onclick="loginRole='tindaklanjut';renderLogin()">Tindak Lanjut</button>
       <button class="${loginRole==='admin'?'on':''}" onclick="loginRole='admin';renderLogin()">Admin</button>
     </div>
     <div id="login-err"></div>
-    ${loginRole==='asesor'?`
+    ${loginRole!=='admin'?`
       <label class="field"><span class="lbl">Username</span>
         <input class="input" id="li-user" placeholder="Username" autocomplete="username"></label>
       <label class="field"><span class="lbl">Kata Sandi</span>
@@ -450,8 +455,14 @@ async function doLogin(){
       body:JSON.stringify({secret:SYNC_SECRET,type:'login',username,passwordHash})});
     const out=await res.json();
     if(out.ok){
-      setAuth({role:'asesor',name:out.namaLengkap||username,username});
-      VIEW='home';render();checkRemoteConfig();refreshAsrPending();
+      // Role sesungguhnya ditentukan server (bukan dipercaya dari segmen yang diklik di layar login)
+      if(out.role==='tindaklanjut'){
+        setAuth({role:'tindaklanjut',name:out.namaLengkap||username,username,pu:out.puDitugaskan||''});
+        VIEW='tindaklanjut';render();
+      }else{
+        setAuth({role:'asesor',name:out.namaLengkap||username,username});
+        VIEW='home';render();checkRemoteConfig();refreshAsrPending();
+      }
     }else{
       err.innerHTML='<div class="login-err">'+esc(out.error||'Login gagal.')+'</div>';
       if(btn){btn.disabled=false;btn.textContent='Masuk';}
@@ -475,7 +486,7 @@ function topbar(title,sub){
       <button class="icon-btn" onclick="logout()" title="Keluar">⏻</button>
     </div></div>`;
 }
-function _roleLabel(r){return r==='asesor'?'asesor':r==='admin'?'admin':(r||'');}
+function _roleLabel(r){return r==='asesor'?'asesor':r==='admin'?'admin':r==='tindaklanjut'?'tindak lanjut':(r||'');}
 function openDrawer(){
   const auth=getAuth();if(!auth)return;
   const dft=loadDraft();
@@ -487,6 +498,9 @@ function openDrawer(){
       <div class="rl">${esc(auth.role)}</div>
     </div>
     <div class="drawer-nav">
+      ${auth.role==='tindaklanjut'?`
+      <p class="hint" style="padding:0 14px;margin-bottom:6px">Akun ini dikunci khusus untuk Tindak Lanjut Temuan PU ${esc(auth.pu||'')}.</p>
+      `:`
       <button class="drawer-item" onclick="drawerGo('home')"><span class="di-ic">🏠</span> Beranda</button>
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('tindaklanjut')"><span class="di-ic">🛠️</span> Tindak Lanjut Temuan</button>`:''}
       ${auth.role==='asesor'?`<button class="drawer-item" onclick="drawerGo('temuansaya')"><span class="di-ic">✅</span> Temuan Saya${_asrPending?` <span style="background:var(--red);color:#fff;font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px;margin-left:4px">${_asrPending}</span>`:''}</button>`:''}
@@ -495,6 +509,7 @@ function openDrawer(){
       <button class="drawer-item" onclick="drawerGo('dashboard')"><span class="di-ic">🔍</span> Dashboard Temuan</button>
       ${dft?`<button class="drawer-item" onclick="drawerResume()"><span class="di-ic">📝</span> Lanjutkan Konsep Tersimpan</button>`:''}
       ${auth.role==='admin'?`<button class="drawer-item" onclick="drawerGo('admin')"><span class="di-ic">⚙️</span> Kelola Formulir & Butir Audit</button>`:''}
+      `}
       <button class="drawer-item" onclick="closeDrawer();openPanduan()"><span class="di-ic">📘</span> Panduan Penggunaan</button>
       <button class="drawer-item danger" onclick="closeDrawer();logout()"><span class="di-ic">🚪</span> Keluar</button>
     </div>
@@ -1049,7 +1064,7 @@ function renderAssessBody(){
       <span class="aspect-score">${anyAns?'Nilai '+aspectScore(yes):''}</span></div>`;
     // (P-galeri) Galeri foto standar/acuan PU ini — ditampilkan sebagai carousel
     // (bukan 1 foto statis) sebelum klausul aspek ini sebagai panduan asesor
-    const galeriAcuan=fotoStandarGaleriFor(areaId,asp,d.pu);
+    const galeriAcuan=FITUR_FOTO_ACUAN_AKTIF?fotoStandarGaleriFor(areaId,asp,d.pu):[];
     if(galeriAcuan.length){
       const gkey=`${areaId}_${asp}`.replace(/[^\w]/g,'_');
       if(!window._galeriIdx)window._galeriIdx={};
@@ -2116,24 +2131,42 @@ function renderUserList(){
       <h2 style="margin:0">Kelola Akun Asesor</h2>
       <button class="btn btn-ghost btn-sm" onclick="loadUserList()">Perbarui</button>
     </div>
-    <p class="hint">Setiap asesor memerlukan akun (username + password) untuk masuk ke aplikasi. Password tidak pernah bisa dilihat kembali oleh admin — hanya dapat direset ke password baru.</p>
-    <button class="btn btn-amber btn-block" onclick="showRegisterUser()">+ Daftarkan Asesor Baru</button>
+    <p class="hint">Setiap asesor/PIC Tindak Lanjut memerlukan akun (username + password) untuk masuk ke aplikasi. Password tidak pernah bisa dilihat kembali oleh admin — hanya dapat direset ke password baru.</p>
+    <button class="btn btn-amber btn-block" onclick="showRegisterUser()">+ Daftarkan Akun Baru</button>
   </div>
-  ${users.length?users.map(u=>`<div class="list-row">
-      <div class="nm">${esc(u.namaLengkap||u.username)}
+  ${users.length?users.map(u=>{
+    const isTL=u.role==='tindaklanjut';
+    return `<div class="list-row">
+      <div class="nm">${esc(u.namaLengkap||u.username)}${isTL?` <span style="background:#5B21B6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:99px">TL · ${esc(u.puDitugaskan||'?')}</span>`:''}
         <div style="font-size:12px;color:var(--muted);font-weight:400">@${esc(u.username)} · ${u.aktif==='Ya'?'<span style="color:var(--lime);font-weight:700">Aktif</span>':'<span style="color:var(--red);font-weight:700">Nonaktif</span>'}</div>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="showSetUserRole('${esc(u.username)}','${esc(u.role||'asesor')}','${esc(u.puDitugaskan||'')}')">Peran</button>
       <button class="btn btn-ghost btn-sm" onclick="showResetPassword('${esc(u.username)}')">Reset Sandi</button>
       <button class="btn ${u.aktif==='Ya'?'btn-danger':'btn-ghost'} btn-sm" onclick="toggleUserActive('${esc(u.username)}',${u.aktif!=='Ya'})">${u.aktif==='Ya'?'Nonaktifkan':'Aktifkan'}</button>
-    </div>`).join(''):'<div class="empty"><div class="ic">👤</div>Belum ada akun asesor terdaftar.</div>'}`;
+    </div>`;
+  }).join(''):'<div class="empty"><div class="ic">👤</div>Belum ada akun terdaftar.</div>'}`;
+}
+function _puOptionsHTML(selected){
+  const pus=Object.keys(STORE.config.matrix||{});
+  return pus.map(p=>`<option ${p===selected?'selected':''}>${esc(p)}</option>`).join('');
 }
 function showRegisterUser(){
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
-    <h3>Daftarkan Asesor Baru</h3>
+    <h3>Daftarkan Akun Baru</h3>
+    <label class="field"><span class="lbl">Peran</span>
+      <select class="input" id="ru-role" onchange="$('#ru-pu-wrap').style.display=this.value==='tindaklanjut'?'block':'none'">
+        <option value="asesor">Asesor</option>
+        <option value="tindaklanjut">PIC Tindak Lanjut</option>
+      </select></label>
+    <div id="ru-pu-wrap" style="display:none">
+      <label class="field"><span class="lbl">PU Ditugaskan</span>
+        <select class="input" id="ru-pu"><option value="">— Pilih PU —</option>${_puOptionsHTML('')}</select></label>
+      <p class="hint" style="margin-top:-8px">Akun ini hanya akan bisa menindaklanjuti temuan milik PU ini.</p>
+    </div>
     <label class="field"><span class="lbl">Nama Lengkap</span><input class="input" id="ru-nama" placeholder="Nama Lengkap"></label>
     <label class="field"><span class="lbl">Username</span><input class="input" id="ru-user" placeholder="Username (bebas, tanpa spasi)" autocomplete="off"></label>
-    <label class="field"><span class="lbl">Password Awal</span><input class="input" id="ru-pass" type="text" placeholder="Password awal untuk asesor ini"></label>
-    <p class="hint" style="margin-top:-8px">Sampaikan username dan password ini secara langsung kepada asesor yang bersangkutan.</p>
+    <label class="field"><span class="lbl">Password Awal</span><input class="input" id="ru-pass" type="text" placeholder="Password awal untuk akun ini"></label>
+    <p class="hint" style="margin-top:-8px">Sampaikan username dan password ini secara langsung kepada pemilik akun.</p>
     <div id="ru-err"></div>
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
@@ -2143,18 +2176,52 @@ function showRegisterUser(){
 }
 async function registerNewUser(){
   const nama=$('#ru-nama').value.trim(), username=$('#ru-user').value.trim(), pass=$('#ru-pass').value;
+  const role=$('#ru-role').value, puDitugaskan=(role==='tindaklanjut')?$('#ru-pu').value:'';
   const err=$('#ru-err');
   if(!username||!pass){err.innerHTML='<p class="hint" style="color:var(--red)">Username dan password wajib diisi.</p>';return;}
   if(/\s/.test(username)){err.innerHTML='<p class="hint" style="color:var(--red)">Username tidak boleh mengandung spasi.</p>';return;}
+  if(role==='tindaklanjut'&&!puDitugaskan){err.innerHTML='<p class="hint" style="color:var(--red)">PU Ditugaskan wajib dipilih untuk akun PIC Tindak Lanjut.</p>';return;}
   const btn=$('#ru-submit');btn.disabled=true;btn.textContent='Memproses…';
   try{
     const passwordHash=await sha256Hex(pass);
     const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({secret:SYNC_SECRET,type:'registerUser',username,namaLengkap:nama,passwordHash,dibuatOleh:getAuth().name||'Admin'})});
+      body:JSON.stringify({secret:SYNC_SECRET,type:'registerUser',username,namaLengkap:nama,passwordHash,dibuatOleh:getAuth().name||'Admin',role,puDitugaskan})});
     const out=await res.json();
-    if(out.ok){closeModal();toast('Akun asesor berhasil didaftarkan');loadUserList();}
+    if(out.ok){closeModal();toast('Akun berhasil didaftarkan');loadUserList();}
     else{err.innerHTML='<p class="hint" style="color:var(--red)">'+esc(out.error||'Gagal mendaftarkan akun')+'</p>';btn.disabled=false;btn.textContent='Daftarkan';}
   }catch(e){err.innerHTML='<p class="hint" style="color:var(--red)">Gagal terhubung ke server.</p>';btn.disabled=false;btn.textContent='Daftarkan';}
+}
+function showSetUserRole(username,curRole,curPu){
+  $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
+    <h3>Ubah Peran — @${esc(username)}</h3>
+    <label class="field"><span class="lbl">Peran</span>
+      <select class="input" id="sr-role" onchange="$('#sr-pu-wrap').style.display=this.value==='tindaklanjut'?'block':'none'">
+        <option value="asesor" ${curRole==='asesor'?'selected':''}>Asesor</option>
+        <option value="tindaklanjut" ${curRole==='tindaklanjut'?'selected':''}>PIC Tindak Lanjut</option>
+      </select></label>
+    <div id="sr-pu-wrap" style="display:${curRole==='tindaklanjut'?'block':'none'}">
+      <label class="field"><span class="lbl">PU Ditugaskan</span>
+        <select class="input" id="sr-pu"><option value="">— Pilih PU —</option>${_puOptionsHTML(curPu)}</select></label>
+    </div>
+    <div id="sr-err"></div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-ghost" style="flex:1" onclick="closeModal()">Batalkan</button>
+      <button class="btn btn-primary" style="flex:1" id="sr-submit" onclick="doSetUserRole('${esc(username)}')">Simpan</button>
+    </div>
+  </div></div>`;
+}
+async function doSetUserRole(username){
+  const role=$('#sr-role').value, puDitugaskan=(role==='tindaklanjut')?$('#sr-pu').value:'';
+  const err=$('#sr-err');
+  if(role==='tindaklanjut'&&!puDitugaskan){err.innerHTML='<p class="hint" style="color:var(--red)">PU Ditugaskan wajib dipilih untuk akun PIC Tindak Lanjut.</p>';return;}
+  const btn=$('#sr-submit');btn.disabled=true;btn.textContent='Memproses…';
+  try{
+    const res=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({secret:SYNC_SECRET,type:'setUserRole',username,role,puDitugaskan})});
+    const out=await res.json();
+    if(out.ok){closeModal();toast('Peran akun diperbarui');loadUserList();}
+    else{err.innerHTML='<p class="hint" style="color:var(--red)">'+esc(out.error||'Gagal mengubah peran')+'</p>';btn.disabled=false;btn.textContent='Simpan';}
+  }catch(e){err.innerHTML='<p class="hint" style="color:var(--red)">Gagal terhubung ke server.</p>';btn.disabled=false;btn.textContent='Simpan';}
 }
 function showResetPassword(username){
   $('#modal-root').innerHTML=`<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">
@@ -2612,6 +2679,141 @@ function _pptSafetySlide(pptx,s){
   slide.addText([{text:'Deskripsi: ',options:{bold:true,color:'0B3D2E'}},{text:s.deskripsi||'—'}],{x:0.2,y,w:9.6,h:0.6,fontSize:11,valign:'top',fontFace:'Arial'});
 }
 
+/* ---------- Ekspor PPT Before/After dari modul Tindak Lanjut (admin & akun PIC Tindak Lanjut) ----------
+   Data di _tlFindings/_tlSafety SENGAJA tidak membawa foto (dibuang demi payload listing yang
+   ringan) — jadi di sini foto ditarik ulang per-baris, on-demand, cuma untuk baris yang sedang
+   diekspor (sesuai filter PU/Status/tab yang aktif), lalu disusun jadi 1 file .pptx client-side. */
+async function _tlFetchPhotos(rows,isSafety){
+  return Promise.all(rows.map(async x=>{
+    const id=tlId(x);
+    if(!x['_adaFotoTemuan']&&!x['_adaFotoPerbaikan'])return Object.assign({},x,{_foto:'',_fotoP:''});
+    try{
+      const url=isSafety
+        ? SYNC_URL+'?action=safetyPhotos&safetyId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET)
+        : SYNC_URL+'?action=findingPhotos&findingId='+encodeURIComponent(id)+'&secret='+encodeURIComponent(SYNC_SECRET);
+      const r=await fetch(url).then(res=>res.json());
+      return Object.assign({},x,{_foto:r.foto||'',_fotoP:r.fotoPerbaikan||''});
+    }catch(e){return Object.assign({},x,{_foto:'',_fotoP:''});}
+  }));
+}
+async function exportTLPPT(){
+  const btn=$('#tl-export-btn');
+  const orig=btn?btn.textContent:'';
+  const rows=tlRows();
+  if(!rows.length){toastError('Tidak ada temuan untuk diekspor pada filter ini');return;}
+  if(btn){btn.disabled=true;btn.textContent='Menyiapkan…';}
+  try{
+    await _loadScriptOnce(PPTXGENJS_CDN);
+    const isSafety=TL.tab==='safety';
+    const withPhotos=await _tlFetchPhotos(rows,isSafety);
+
+    const pptx=new PptxGenJS();
+    pptx.layout='LAYOUT_4x3';
+    const cover=pptx.addSlide();
+    cover.background={color:'0B3D2E'};
+    const judul=isSafety?'Tindak Lanjut Temuan Safety (K3)':'Tindak Lanjut Temuan 5R';
+    cover.addText(judul,{x:0.5,y:2.3,w:9,h:1,fontSize:28,bold:true,color:'FFFFFF',align:'center',fontFace:'Arial'});
+    cover.addText(TL.pu||'Seluruh PU',{x:0.5,y:3.3,w:9,h:0.6,fontSize:16,color:'FFFFFF',align:'center',fontFace:'Arial'});
+    cover.addText(new Date().toLocaleDateString('id-ID',{day:'2-digit',month:'long',year:'numeric'}),{x:0.5,y:4.0,w:9,h:0.5,fontSize:12,color:'D6DED8',align:'center',fontFace:'Arial'});
+
+    withPhotos.forEach(x=>_pptTLSlide(pptx,x,isSafety));
+
+    const fname=`TindakLanjut_${(TL.pu||'SemuaPU').replace(/[^\w]+/g,'')}_${Date.now()}.pptx`;
+    await pptx.writeFile({fileName:fname});
+    toast('PPT berhasil diunduh');
+  }catch(e){
+    toastError('Gagal membuat PPT. Pastikan Anda terhubung internet (sekali saja untuk memuat library-nya).');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=orig;}
+  }
+}
+function _pptTLSlide(pptx,x,isSafety){
+  const slide=pptx.addSlide();
+  slide.background={color:'FFFFFF'};
+  slide.addShape(pptx.ShapeType.rect,{x:0,y:0,w:10,h:0.6,fill:{color:'0B3D2E'}});
+  const lokasiTxt=isSafety?(x['Lokasi Titik']||''):(x['Area']||'');
+  const headerText=`${x['PU']||''} — ${x['Lokasi']||''}${lokasiTxt?' · '+lokasiTxt:''}${x['Kategori']?' · '+x['Kategori']:''}`;
+  slide.addText(headerText,{x:0.2,y:0,w:7.8,h:0.6,fontSize:13,bold:true,color:'FFFFFF',valign:'middle',fontFace:'Arial'});
+  const st=x['Status']||'Open';
+  const stColor=st==='Close'?'1E7A5A':st==='Menunggu Verifikasi'?'E8A317':'C0392B';
+  slide.addShape(pptx.ShapeType.roundRect,{x:8.1,y:0.12,w:1.7,h:0.36,fill:{color:stColor},rectRadius:0.06});
+  slide.addText(st,{x:8.1,y:0.12,w:1.7,h:0.36,fontSize:10,bold:true,color:'FFFFFF',align:'center',valign:'middle',fontFace:'Arial'});
+
+  const slots=[[x['_foto']||'','SEBELUM',0.2],[x['_fotoP']||'','SESUDAH',5.1]];
+  slots.forEach(function(s){
+    const foto=s[0],label=s[1],x0=s[2];
+    const ay=0.75,bw=4.7,bh=3.3;
+    slide.addText(label,{x:x0,y:ay-0.28,w:bw,h:0.26,fontSize:9,bold:true,color:'6B7280',fontFace:'Arial'});
+    if(foto){
+      try{slide.addImage({data:foto,x:x0,y:ay,w:bw,h:bh,sizing:{type:'contain',w:bw,h:bh}});}catch(e){}
+    }else{
+      slide.addShape(pptx.ShapeType.rect,{x:x0,y:ay,w:bw,h:bh,fill:{color:'F3F4F6'},line:{color:'D6DED8'}});
+      slide.addText('(Tidak ada foto)',{x:x0,y:ay,w:bw,h:bh,fontSize:10,color:'9CA3AF',align:'center',valign:'middle',fontFace:'Arial'});
+    }
+  });
+
+  let y=4.25;
+  slide.addText([{text:'Deskripsi: ',options:{bold:true,color:'0B3D2E'}},{text:x['Deskripsi']||'—'}],{x:0.2,y,w:9.6,h:0.45,fontSize:10,valign:'top',fontFace:'Arial'});
+  y+=0.5;
+  slide.addText([{text:'Tindak Lanjut: ',options:{bold:true,color:'1D4ED8'}},{text:x['Deskripsi Perbaikan']||'—'}],{x:0.2,y,w:9.6,h:0.45,fontSize:10,valign:'top',fontFace:'Arial'});
+  y+=0.5;
+  const tglP=x['Tgl Perbaikan']?String(x['Tgl Perbaikan']).slice(0,10):'—';
+  slide.addText(`Tanggal Selesai: ${tglP}   |   Verifikator: ${x['Verifikator']||'—'}`,{x:0.2,y,w:9.6,h:0.3,fontSize:9,color:'6B7280',fontFace:'Arial'});
+}
+
+/* ---------- Ekspor Before/After sebagai PDF (via cetak browser) — reuse tampilan & CSS
+   .present-* yang sudah ada dari fitur Ringkasan Temuan, supaya tidak bikin infrastruktur baru. ---------- */
+async function exportTLPDF(){
+  const btn=$('#tl-pdf-btn');
+  const orig=btn?btn.textContent:'';
+  const rows=tlRows();
+  if(!rows.length){toastError('Tidak ada temuan untuk dicetak pada filter ini');return;}
+  if(btn){btn.disabled=true;btn.textContent='Menyiapkan…';}
+  try{
+    const isSafety=TL.tab==='safety';
+    _tlPrintData=await _tlFetchPhotos(rows,isSafety);
+    _tlPrintIsSafety=isSafety;
+    drawTLPrint();
+  }catch(e){
+    toastError('Gagal menyiapkan data cetak.');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=orig;}
+  }
+}
+let _tlPrintData=null,_tlPrintIsSafety=false;
+function drawTLPrint(){
+  const b=$('#tl-body');if(!b||!_tlPrintData)return;
+  b.innerHTML=`
+  <div class="present-toolbar" style="flex-direction:column;gap:8px">
+    <button class="btn btn-ghost btn-block" onclick="drawTL()">‹ Kembali ke Daftar</button>
+    <button class="btn btn-primary btn-block" onclick="window.print()">🖨️ Cetak / Simpan sebagai PDF</button>
+  </div>
+  <div class="wrap present-print">
+    ${_tlPrintData.map(x=>_tlPrintCardHTML(x,_tlPrintIsSafety)).join('')}
+  </div>`;
+}
+function _tlPrintCardHTML(x,isSafety){
+  const st=x['Status']||'Open';
+  const stColor=st==='Close'?'var(--green-400)':st==='Menunggu Verifikasi'?'var(--amber)':'var(--red)';
+  const lokasiTxt=isSafety?(x['Lokasi Titik']||''):(x['Area']||'');
+  const before=x['_foto'],after=x['_fotoP'];
+  return `<div class="present-card">
+    <div class="ph-head">
+      <b>${esc(x['PU']||'')} — ${esc(x['Lokasi']||'')}${lokasiTxt?' · '+esc(lokasiTxt):''}</b>
+      <span class="ph-status" style="background:${stColor}">${esc(st)}</span>
+    </div>
+    <div class="present-photos">
+      ${before?`<div class="ph-cap" data-cap="SEBELUM"><img src="${before}"></div>`:'<div class="ph-empty">Tidak ada foto sebelum</div>'}
+      ${after?`<div class="ph-cap" data-cap="SESUDAH"><img src="${after}"></div>`:'<div class="ph-empty">Tidak ada foto sesudah</div>'}
+    </div>
+    <div class="present-body">
+      <div class="pb-row"><div class="pb-lbl">Deskripsi</div>${esc(x['Deskripsi']||'—')}</div>
+      <div class="pb-row"><div class="pb-lbl">Tindak Lanjut</div>${esc(x['Deskripsi Perbaikan']||'—')}</div>
+      <div class="pb-row"><div class="pb-lbl">Tanggal Selesai / Verifikator</div>${esc((x['Tgl Perbaikan']||'').slice(0,10)||'—')} · ${esc(x['Verifikator']||'—')}</div>
+    </div>
+  </div>`;
+}
+
 /* ============ TEMUAN SAFETY (K3) — bisa dicatat kapan saja selama assessment ============
    Terpisah dari temuan 5R. Disimpan di DRAFT.safetyFindings = [ {id, deskripsi,
    lokasi, kategori, foto, tanggal} ]. Tombol mengambang (FAB) merah muncul di setiap
@@ -2814,10 +3016,12 @@ function cssid(s){return String(s).replace(/[^\w]/g,'_');}
 function tlV(x,key){const d=TL_DRAFT[tlId(x)];if(d&&Object.prototype.hasOwnProperty.call(d,key))return d[key];return x[key]||'';}
 
 function renderTindakLanjut(){
-  app().innerHTML=topbar('Tindak Lanjut Temuan','Semua PU')+`
+  const auth=getAuth();const isTLAccount=auth&&auth.role==='tindaklanjut';
+  if(isTLAccount)TL.pu=auth.pu||''; // selalu dipaksa ke PU akun ini — jangan kebawa filter sesi admin sebelumnya
+  app().innerHTML=topbar('Tindak Lanjut Temuan',isTLAccount?('PU '+(auth.pu||'')):'Semua PU')+`
   <div class="wrap" id="tl-body"><div class="empty"><div class="ic">⏳</div>Mengambil data dari Google…</div></div>
   <div class="botbar" style="gap:8px">
-    <button class="btn btn-ghost" style="flex:.6" onclick="tlLeave()">‹ Beranda</button>
+    ${isTLAccount?'':'<button class="btn btn-ghost" style="flex:.6" onclick="tlLeave()">‹ Beranda</button>'}
     <button class="btn btn-primary" id="tl-kirim-btn" onclick="tlKirim()">⬆ Kirim ke Google (${tlDirtyCount()})</button>
   </div>`;
   if(TL.view==='desktop'){const a=app();if(a)a.style.maxWidth='1180px';}
@@ -2830,10 +3034,11 @@ function tlLeave(){
 async function loadTL(){
   const b=$('#tl-body');if(!b)return;
   if(!SYNC_URL){b.innerHTML='<div class="empty">Sinkronisasi belum diaktifkan.</div>';return;}
+  const _u=encodeURIComponent(getAuth().username||'');
   try{
     const [rf,rs]=await Promise.all([
-      fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json()),
-      fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET)).then(r=>r.json())
+      fetch(SYNC_URL+'?action=findings&secret='+encodeURIComponent(SYNC_SECRET)+'&username='+_u).then(r=>r.json()),
+      fetch(SYNC_URL+'?action=safetyFindings&secret='+encodeURIComponent(SYNC_SECRET)+'&username='+_u).then(r=>r.json())
     ]);
     _tlFindings=(rf&&rf.ok&&rf.findings)||[];
     _tlSafety=(rs&&rs.ok&&rs.safety)||[];
@@ -2850,6 +3055,7 @@ function tlRows(){
 function _daysSince(iso){if(!iso)return 0;const d=(Date.now()-new Date(iso).getTime())/86400000;return isNaN(d)?0:Math.floor(d);}
 function drawTL(){
   const b=$('#tl-body');if(!b)return;
+  const isTLAccount=getAuth().role==='tindaklanjut';
   const allRows=(TL.tab==='temuan'?_tlFindings:_tlSafety)||[];
   const puList=[...new Set(allRows.map(x=>x['PU']).filter(Boolean))].sort();
   const rows=tlRows();
@@ -2876,10 +3082,12 @@ function drawTL(){
         <option value="Close" ${TL.status==='Close'?'selected':''}>Selesai</option>
         <option value="" ${TL.status===''?'selected':''}>Seluruh Status</option>
       </select>
-      <select class="input" style="flex:1;min-width:120px" onchange="TL.pu=this.value;TL.sel=null;drawTL()">
-        <option value="">Seluruh PU</option>${puList.map(p=>`<option ${p===TL.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>
+      ${isTLAccount?'':`<select class="input" style="flex:1;min-width:120px" onchange="TL.pu=this.value;TL.sel=null;drawTL()">
+        <option value="">Seluruh PU</option>${puList.map(p=>`<option ${p===TL.pu?'selected':''}>${esc(p)}</option>`).join('')}</select>`}
       <button class="btn btn-ghost btn-sm" onclick="tlToggleView()">${TL.view==='desktop'?'📱 Ponsel':'🖥️ Desktop'}</button>
       <button class="btn btn-ghost btn-sm" onclick="tlRefresh()">Perbarui</button>
+      <button class="btn btn-ghost btn-sm" id="tl-export-btn" onclick="exportTLPPT()">⬇ Before/After (PPT)</button>
+      <button class="btn btn-ghost btn-sm" id="tl-pdf-btn" onclick="exportTLPDF()">⬇ Before/After (PDF)</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:8px">${rows.length} temuan ditampilkan${tlDirtyCount()?` · <b style="color:var(--amber)">${tlDirtyCount()} draf belum dikirim</b>`:''}</div>
   </div>`;
@@ -2996,8 +3204,8 @@ async function tlKirim(){
     if(fields.Status==='Close'&&!fields.Verifikator)fields.Verifikator=getAuth().name||'Admin';
     try{
       const body=isSafety
-        ? {secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||''}
-        : {secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||''};
+        ? {secret:SYNC_SECRET,type:'updateSafetyFinding',safetyId:id,fields,verifikator:getAuth().name||'',username:getAuth().username||''}
+        : {secret:SYNC_SECRET,type:'updateFinding',findingId:id,fields,verifikator:getAuth().name||'',username:getAuth().username||''};
       const bodyStr=JSON.stringify(body);
       const opts={method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:bodyStr,redirect:'follow'};
       let success=false;
